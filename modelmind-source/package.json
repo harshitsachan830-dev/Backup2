@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "node scripts/run-local.mjs dev",
     "companion": "node scripts/run-local.mjs companion",
-    "build": "next build",
+    "build": "next build --webpack",
     "start": "next start",
     "start:local": "node scripts/run-local.mjs start",
     "lint": "eslint"
