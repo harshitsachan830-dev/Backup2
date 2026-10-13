@@ -1,0 +1,1271 @@
+import json
+import os
+import pathlib
+
+import tornado
+
+from jupyter_server.base.handlers import APIHandler
+from jupyter_server.utils import url_path_join
+
+from .cloud_policy import (
+    gemini_api_key_configured,
+    gemini_fallback_enabled,
+    health_policy_status,
+)
+from .credentials import (
+    delete_stored_gemini_api_key,
+    get_stored_gemini_api_key,
+    store_gemini_api_key,
+)
+from .diagnostics import analyze_error
+from .gemini import suggest_fix_with_gemini, chat_with_gemini
+from .fix_validation import (
+    normalize_fix_payload,
+    suggest_rowwise_apply_fix,
+    suggest_merge_suffix_fix,
+    validate_candidate_fix,
+)
+from .ollama import (
+    check_ollama_status,
+    ensure_model_ready,
+    explain_code_with_ollama,
+    explain_with_ollama,
+    suggest_fix_with_ollama,
+    chat_with_ollama,
+)
+from .dataset import (
+    analyze_dataset,
+    analyze_target,
+    analyze_feature,
+)
+from .preprocessing_advisor import (
+    analyze_preprocessing,
+)
+from .preprocessing_preview import (
+    preview_preprocessing,
+)
+from .preprocessing_apply import (
+    apply_preprocessing,
+    undo_preprocessing,
+)
+from .ml_mistake_detector import (
+    analyze_ml_mistakes,
+)
+from .dataset_intelligence import (
+    analyze_error_for_tutor,
+)
+from .model_recommender import (
+    recommend_models,
+)
+
+MAX_CAPTURE_BYTES = 40_000
+MAX_API_KEY_BYTES = 4_096
+MAX_API_KEY_LENGTH = 512
+MAX_FIELD_LENGTHS = {
+    "cell_id": 256,
+    "code": 20_000,
+    "error_type": 200,
+    "error_message": 2_000,
+    "traceback": 12_000,
+}
+
+
+def normalize_error_payload(payload):
+    if not isinstance(payload, dict):
+        raise ValueError("The request body must be a JSON object.")
+
+    if set(payload) != set(MAX_FIELD_LENGTHS):
+        raise ValueError("The request must contain exactly the supported error fields.")
+
+    normalized = {}
+    for field, max_length in MAX_FIELD_LENGTHS.items():
+        value = payload[field]
+        if not isinstance(value, str):
+            raise ValueError(f"{field} must be a string.")
+        if len(value) > max_length:
+            raise ValueError(f"{field} exceeds the {max_length}-character limit.")
+        if field in {"cell_id", "error_type"} and not value:
+            raise ValueError(f"{field} cannot be empty.")
+        normalized[field] = value
+
+    return normalized
+
+
+class HealthHandler(APIHandler):
+    @tornado.web.authenticated
+    def get(self):
+        self.set_header("Content-Type", "application/json")
+        health = {"status": "ok", "local_ai": "setup_pending"}
+        health.update(health_policy_status())
+        self.finish(json.dumps(health))
+
+
+class GeminiAPIKeyHandler(APIHandler):
+    @tornado.web.authenticated
+    def get(self):
+        self.set_header("Content-Type", "application/json")
+        environment_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+        try:
+            stored_key = get_stored_gemini_api_key()
+        except Exception:
+            self.log.exception("Could not read the operating-system credential store.")
+            self.set_status(503)
+            self.finish(json.dumps({"error": "The system credential store is unavailable."}))
+            return
+
+        source = "desktop" if stored_key else "environment" if environment_key else None
+        self.finish(json.dumps({"configured": bool(environment_key or stored_key), "source": source}))
+
+    @tornado.web.authenticated
+    def post(self):
+        self.set_header("Content-Type", "application/json")
+        if len(self.request.body) > MAX_API_KEY_BYTES:
+            self.set_status(413)
+            self.finish(json.dumps({"error": "The API key request is too large."}))
+            return
+
+        try:
+            payload = json.loads(self.request.body)
+            if not isinstance(payload, dict) or set(payload) != {"api_key"}:
+                raise ValueError("The request must contain only api_key.")
+            api_key = payload["api_key"]
+            if not isinstance(api_key, str):
+                raise ValueError("api_key must be a string.")
+            api_key = api_key.strip()
+            if not api_key or len(api_key) > MAX_API_KEY_LENGTH:
+                raise ValueError(f"api_key must be between 1 and {MAX_API_KEY_LENGTH} characters.")
+            store_gemini_api_key(api_key)
+        except (json.JSONDecodeError, UnicodeDecodeError, ValueError) as error:
+            self.set_status(400)
+            self.finish(json.dumps({"error": str(error)}))
+            return
+        except Exception:
+            self.log.exception("Could not save the Gemini API key to the operating-system credential store.")
+            self.set_status(503)
+            self.finish(json.dumps({"error": "The system credential store is unavailable."}))
+            return
+
+        self.finish(json.dumps({"configured": True, "source": "desktop"}))
+
+    @tornado.web.authenticated
+    def delete(self):
+        self.set_header("Content-Type", "application/json")
+        try:
+            delete_stored_gemini_api_key()
+        except Exception:
+            self.log.exception("Could not delete the Gemini API key from the operating-system credential store.")
+            self.set_status(503)
+            self.finish(json.dumps({"error": "The system credential store is unavailable."}))
+            return
+
+        environment_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+        self.finish(
+            json.dumps(
+                {
+                    "configured": bool(environment_key),
+                    "source": "environment" if environment_key else None,
+                }
+            )
+        )
+
+
+class AnalyzeErrorHandler(APIHandler):
+    @tornado.web.authenticated
+    def post(self):
+        self.set_header("Content-Type", "application/json")
+        if len(self.request.body) > MAX_CAPTURE_BYTES:
+            self.set_status(413)
+            self.finish(json.dumps({"error": "The error payload is too large."}))
+            return
+
+        try:
+            payload = json.loads(self.request.body)
+            normalized = normalize_error_payload(payload)
+        except (json.JSONDecodeError, UnicodeDecodeError, ValueError) as error:
+            self.set_status(400)
+            self.finish(json.dumps({"error": str(error)}))
+            return
+
+        self.finish(
+            json.dumps(
+                {
+                    "status": "analyzed",
+                    "error": normalized,
+                    "analysis": analyze_error(normalized),
+                }
+            )
+        )
+
+
+class ExplainErrorHandler(APIHandler):
+    @tornado.web.authenticated
+    async def post(self):
+        self.set_header("Content-Type", "application/json")
+        if len(self.request.body) > MAX_CAPTURE_BYTES:
+            self.set_status(413)
+            self.finish(json.dumps({"error": "The error payload is too large."}))
+            return
+
+        try:
+            normalized = normalize_error_payload(json.loads(self.request.body))
+        except (json.JSONDecodeError, UnicodeDecodeError, ValueError) as error:
+            self.set_status(400)
+            self.finish(json.dumps({"error": str(error)}))
+            return
+
+        deterministic = analyze_error(normalized)
+        if deterministic["is_sufficient"]:
+            self.finish(
+                json.dumps(
+                    {"status": "deterministic_sufficient", "analysis": deterministic}
+                )
+            )
+            return
+
+        result = await explain_with_ollama(normalized)
+        self.finish(json.dumps(result))
+
+
+class LocalAIStatusHandler(APIHandler):
+    @tornado.web.authenticated
+    async def get(self):
+        self.set_header("Content-Type", "application/json")
+        self.finish(json.dumps(await check_ollama_status()))
+
+
+class LocalAIInstallHandler(APIHandler):
+    @tornado.web.authenticated
+    async def post(self):
+        self.set_header("Content-Type", "application/json")
+        if len(self.request.body) > MAX_CAPTURE_BYTES:
+            self.set_status(413)
+            self.finish(json.dumps({"error": "The install request is too large."}))
+            return
+
+        try:
+            payload = json.loads(self.request.body)
+            if not isinstance(payload, dict):
+                raise ValueError("The request body must be a JSON object.")
+            model_id = payload.get("model_id")
+            if model_id is not None and not isinstance(model_id, str):
+                raise ValueError("The model_id must be a string when provided.")
+            allow_download = bool(payload.get("allow_download", False))
+            result = await ensure_model_ready(model_id=model_id, allow_download=allow_download)
+        except (json.JSONDecodeError, UnicodeDecodeError, ValueError) as error:
+            self.set_status(400)
+            self.finish(json.dumps({"error": str(error)}))
+            return
+
+        self.finish(json.dumps(result))
+
+
+class LocalAIModelEnsureHandler(APIHandler):
+    @tornado.web.authenticated
+    async def post(self):
+        self.set_header("Content-Type", "application/json")
+        if len(self.request.body) > MAX_CAPTURE_BYTES:
+            self.set_status(413)
+            self.finish(json.dumps({"error": "The ensure request is too large."}))
+            return
+
+        try:
+            payload = json.loads(self.request.body)
+            if not isinstance(payload, dict):
+                raise ValueError("The request body must be a JSON object.")
+            model_id = payload.get("model_id")
+            if model_id is not None and not isinstance(model_id, str):
+                raise ValueError("The model_id must be a string when provided.")
+            allow_download = bool(payload.get("allow_download", False))
+            result = await ensure_model_ready(model_id=model_id, allow_download=allow_download)
+        except (json.JSONDecodeError, UnicodeDecodeError, ValueError) as error:
+            self.set_status(400)
+            self.finish(json.dumps({"error": str(error)}))
+            return
+
+        self.finish(json.dumps(result))
+
+
+class SuggestFixHandler(APIHandler):
+    @tornado.web.authenticated
+    async def post(self):
+        self.set_header("Content-Type", "application/json")
+        if len(self.request.body) > MAX_CAPTURE_BYTES:
+            self.set_status(413)
+            self.finish(json.dumps({"error": "The fix request is too large."}))
+            return
+
+        try:
+            payload = json.loads(self.request.body)
+            if not isinstance(payload, dict):
+                raise ValueError("The request body must be a JSON object.")
+            error = payload.get("error")
+            notebook_context = payload.get("notebook_context", "")
+            provider = payload.get("provider", "ollama")
+            allow_gemini_fallback = payload.get("allow_gemini_fallback", False)
+            if provider not in {"ollama", "gemini"}:
+                raise ValueError("provider must be either 'ollama' or 'gemini'.")
+            if not isinstance(allow_gemini_fallback, bool):
+                raise ValueError("allow_gemini_fallback must be a boolean.")
+            if not isinstance(notebook_context, str) or len(notebook_context) > 12_000:
+                raise ValueError("Notebook context must be a string of at most 12000 characters.")
+            normalized = normalize_error_payload(error)
+        except (json.JSONDecodeError, UnicodeDecodeError, ValueError) as error:
+            self.set_status(400)
+            self.finish(json.dumps({"error": str(error)}))
+            return
+
+        if provider == "ollama":
+            deterministic_fix = suggest_merge_suffix_fix(normalized, normalized["code"])
+            if deterministic_fix is None:
+                deterministic_fix = suggest_rowwise_apply_fix(
+                    normalized, normalized["code"]
+                )
+            if deterministic_fix is not None:
+                self.finish(json.dumps(deterministic_fix))
+                return
+
+        if provider == "gemini":
+            if not allow_gemini_fallback:
+                self.finish(
+                    json.dumps(
+                        {
+                            "status": "gemini_opt_in_required",
+                            "message": "Enable the Gemini opt-in before sending notebook code to Google.",
+                        }
+                    )
+                )
+                return
+            if not gemini_fallback_enabled():
+                self.finish(
+                    json.dumps(
+                        {
+                            "status": "gemini_disabled",
+                            "message": "Gemini is disabled by the server policy.",
+                        }
+                    )
+                )
+                return
+            if not gemini_api_key_configured():
+                self.finish(
+                    json.dumps(
+                        {
+                            "status": "gemini_unconfigured",
+                            "message": "Save a Gemini API key in the JupyterLab right sidebar's API Key tab to enable Gemini.",
+                        }
+                    )
+                )
+                return
+            gemini_result = await suggest_fix_with_gemini(
+                normalized, notebook_context=notebook_context
+            )
+            gemini_result["fallback_used"] = False
+            self.finish(json.dumps(gemini_result))
+            return
+
+        local_result = await suggest_fix_with_ollama(
+            normalized, notebook_context=notebook_context
+        )
+        if local_result.get("status") == "suggested":
+            local_result.setdefault("provider", "ollama")
+            self.finish(json.dumps(local_result))
+            return
+
+        if not allow_gemini_fallback:
+            local_result["fallback_used"] = False
+            self.finish(json.dumps(local_result))
+            return
+        if not gemini_fallback_enabled():
+            self.finish(
+                json.dumps(
+                    {
+                        "status": "gemini_disabled",
+                        "fallback_used": False,
+                        "ollama_status": local_result.get("status"),
+                        "message": "Gemini fallback is disabled by the server policy.",
+                    }
+                )
+            )
+            return
+        if not gemini_api_key_configured():
+            self.finish(
+                json.dumps(
+                    {
+                        "status": "gemini_unconfigured",
+                        "fallback_used": False,
+                        "ollama_status": local_result.get("status"),
+                        "message": "Save a Gemini API key in the JupyterLab right sidebar's API Key tab to enable Gemini.",
+                    }
+                )
+            )
+            return
+
+        gemini_result = await suggest_fix_with_gemini(
+            normalized, notebook_context=notebook_context
+        )
+        gemini_result["ollama_status"] = local_result.get("status")
+        gemini_result["fallback_used"] = gemini_result.get("status") == "suggested"
+        self.finish(json.dumps(gemini_result))
+
+
+class CodeHelpHandler(APIHandler):
+    @tornado.web.authenticated
+    async def post(self):
+        self.set_header("Content-Type", "application/json")
+        if len(self.request.body) > MAX_CAPTURE_BYTES:
+            self.set_status(413)
+            self.finish(json.dumps({"error": "The code-help request is too large."}))
+            return
+
+        try:
+            payload = json.loads(self.request.body)
+            if not isinstance(payload, dict):
+                raise ValueError("The request body must be a JSON object.")
+            code = payload.get("code")
+            question = payload.get("question")
+            notebook_context = payload.get("notebook_context", "")
+            if not isinstance(code, str) or not code.strip() or len(code) > 20_000:
+                raise ValueError("Code must be a non-empty string of at most 20000 characters.")
+            if not isinstance(question, str) or not question.strip() or len(question) > 1_000:
+                raise ValueError("Question must be a non-empty string of at most 1000 characters.")
+            if not isinstance(notebook_context, str) or len(notebook_context) > 12_000:
+                raise ValueError("Notebook context must be a string of at most 12000 characters.")
+        except (json.JSONDecodeError, UnicodeDecodeError, ValueError) as error:
+            self.set_status(400)
+            self.finish(json.dumps({"error": str(error)}))
+            return
+
+        self.finish(
+            json.dumps(
+                await explain_code_with_ollama(
+                    code, question, notebook_context=notebook_context
+                )
+            )
+        )
+
+
+class ValidateFixHandler(APIHandler):
+    @tornado.web.authenticated
+    def post(self):
+        self.set_header("Content-Type", "application/json")
+        if len(self.request.body) > MAX_CAPTURE_BYTES:
+            self.set_status(413)
+            self.finish(json.dumps({"error": "The validation request is too large."}))
+            return
+
+        try:
+            payload = json.loads(self.request.body)
+            normalized = normalize_fix_payload(payload)
+            result = validate_candidate_fix(
+                normalized["original_code"],
+                normalized["candidate_code"],
+                payload.get("error_type"),
+                payload.get("error_message"),
+            )
+        except (json.JSONDecodeError, UnicodeDecodeError, ValueError) as error:
+            self.set_status(400)
+            self.finish(json.dumps({"error": str(error)}))
+            return
+
+        self.finish(json.dumps(result))
+
+
+
+# =========================================================
+# PATH RESOLVER HELPER
+# =========================================================
+
+def _resolve_dataset_path(file_path: str) -> pathlib.Path:
+    p = pathlib.Path(file_path)
+    if p.exists() and p.is_file():
+        return p
+    # Try current working directory
+    cwd_p = pathlib.Path.cwd() / file_path
+    if cwd_p.exists() and cwd_p.is_file():
+        return cwd_p
+    # Try stripping leading slashes
+    clean_rel = file_path.lstrip("/\\")
+    cwd_clean = pathlib.Path.cwd() / clean_rel
+    if cwd_clean.exists() and cwd_clean.is_file():
+        return cwd_clean
+    return p
+
+
+# =========================================================
+# DATASET X-RAY HANDLER
+# =========================================================
+
+class DatasetXRayHandler(APIHandler):
+    @tornado.web.authenticated
+    def post(self):
+        self.set_header("Content-Type", "application/json")
+        try:
+            payload = json.loads(self.request.body)
+            file_path = payload.get("file_path", "")
+            if not isinstance(file_path, str) or not file_path.strip():
+                raise ValueError("file_path must be a non-empty string.")
+        except (json.JSONDecodeError, ValueError) as exc:
+            self.set_status(400)
+            self.finish(json.dumps({"error": str(exc)}))
+            return
+
+        path = _resolve_dataset_path(file_path.strip())
+        if not path.exists() or not path.is_file():
+            self.set_status(404)
+            self.finish(json.dumps({"error": "Dataset file not found.", "path": str(path)}))
+            return
+
+        try:
+            result = analyze_dataset(path)
+        except Exception as exc:
+            self.set_status(500)
+            self.finish(json.dumps({"error": str(exc)}))
+            return
+
+        self.finish(json.dumps(result))
+
+
+# =========================================================
+# TARGET INTELLIGENCE HANDLER
+# =========================================================
+
+class DatasetTargetHandler(APIHandler):
+    @tornado.web.authenticated
+    def post(self):
+        self.set_header("Content-Type", "application/json")
+        try:
+            payload = json.loads(self.request.body)
+            file_path = payload.get("file_path", "")
+            target_column = payload.get("target_column", "")
+            if not isinstance(file_path, str) or not file_path.strip():
+                raise ValueError("file_path must be a non-empty string.")
+            if not isinstance(target_column, str) or not target_column.strip():
+                raise ValueError("target_column must be a non-empty string.")
+        except (json.JSONDecodeError, ValueError) as exc:
+            self.set_status(400)
+            self.finish(json.dumps({"error": str(exc)}))
+            return
+
+        path = _resolve_dataset_path(file_path.strip())
+        if not path.exists() or not path.is_file():
+            self.set_status(404)
+            self.finish(json.dumps({"error": "Dataset file not found.", "path": str(path)}))
+            return
+
+        try:
+            result = analyze_target(path, target_column.strip())
+        except ValueError as exc:
+            self.set_status(400)
+            self.finish(json.dumps({"error": str(exc)}))
+            return
+        except Exception as exc:
+            self.set_status(500)
+            self.finish(json.dumps({"error": f"Target analysis failed: {str(exc)}"}))
+            return
+
+        self.finish(json.dumps(result))
+
+
+# =========================================================
+# FEATURE INTELLIGENCE HANDLER
+# =========================================================
+
+class DatasetFeatureHandler(APIHandler):
+    @tornado.web.authenticated
+    def post(self):
+        self.set_header("Content-Type", "application/json")
+        try:
+            payload = json.loads(self.request.body)
+            file_path = payload.get("file_path", "")
+            feature_column = payload.get("feature_column", "")
+            if not isinstance(file_path, str) or not file_path.strip():
+                raise ValueError("file_path must be a non-empty string.")
+            if not isinstance(feature_column, str) or not feature_column.strip():
+                raise ValueError("feature_column must be a non-empty string.")
+        except (json.JSONDecodeError, ValueError) as exc:
+            self.set_status(400)
+            self.finish(json.dumps({"error": str(exc)}))
+            return
+
+        path = _resolve_dataset_path(file_path.strip())
+        if not path.exists() or not path.is_file():
+            self.set_status(404)
+            self.finish(json.dumps({"error": "Dataset file not found.", "path": str(path)}))
+            return
+
+        try:
+            result = analyze_feature(path, feature_column.strip())
+        except ValueError as exc:
+            self.set_status(400)
+            self.finish(json.dumps({"error": str(exc)}))
+            return
+        except Exception as exc:
+            self.set_status(500)
+            self.finish(json.dumps({"error": f"Feature analysis failed: {str(exc)}"}))
+            return
+
+        self.finish(json.dumps(result))
+
+
+# =========================================================
+# SMART PREPROCESSING ADVISER HANDLER
+# =========================================================
+
+class PreprocessingAdviserHandler(APIHandler):
+    @tornado.web.authenticated
+    def post(self):
+        self.set_header("Content-Type", "application/json")
+        try:
+            payload = json.loads(self.request.body)
+            file_path = payload.get("file_path", "")
+            level = payload.get("level", "basic")
+            if not isinstance(file_path, str) or not file_path.strip():
+                raise ValueError("file_path must be a non-empty string.")
+            if not isinstance(level, str):
+                raise ValueError("level must be a string.")
+        except (json.JSONDecodeError, ValueError) as exc:
+            self.set_status(400)
+            self.finish(json.dumps({"error": str(exc)}))
+            return
+
+        path = _resolve_dataset_path(file_path.strip())
+        if not path.exists() or not path.is_file():
+            self.set_status(404)
+            self.finish(json.dumps({"error": "Dataset file not found.", "path": str(path)}))
+            return
+
+        try:
+            result = analyze_preprocessing(path, level=level)
+        except Exception as exc:
+            self.set_status(500)
+            self.finish(json.dumps({"error": str(exc)}))
+            return
+
+        result["resolved_path"] = str(path.resolve())
+        self.finish(json.dumps(result))
+
+
+# =========================================================
+# PREPROCESSING PREVIEW HANDLER
+# =========================================================
+
+class PreprocessingPreviewHandler(APIHandler):
+    @tornado.web.authenticated
+    def post(self):
+        self.set_header("Content-Type", "application/json")
+        try:
+            payload = json.loads(self.request.body)
+            file_path = payload.get("file_path", "")
+            feature = payload.get("feature", "")
+            strategy = payload.get("strategy", "")
+            if not isinstance(file_path, str) or not file_path.strip():
+                raise ValueError("file_path must be a non-empty string.")
+            if not isinstance(feature, str) or not feature.strip():
+                raise ValueError("feature must be a non-empty string.")
+            if not isinstance(strategy, str) or not strategy.strip():
+                raise ValueError("strategy must be a non-empty string.")
+        except (json.JSONDecodeError, ValueError) as exc:
+            self.set_status(400)
+            self.finish(json.dumps({"error": str(exc)}))
+            return
+
+        path = _resolve_dataset_path(file_path.strip())
+        if not path.exists() or not path.is_file():
+            self.set_status(404)
+            self.finish(json.dumps({"error": "Dataset file not found.", "path": str(path)}))
+            return
+
+        try:
+            result = preview_preprocessing(path, feature=feature.strip(), strategy=strategy.strip())
+        except ValueError as exc:
+            self.set_status(400)
+            self.finish(json.dumps({"error": str(exc)}))
+            return
+        except Exception as exc:
+            self.set_status(500)
+            self.finish(json.dumps({"error": f"Preview failed: {str(exc)}"}))
+            return
+
+        self.finish(json.dumps(result))
+
+
+# =========================================================
+# PREPROCESSING APPLY HANDLER
+# =========================================================
+
+class PreprocessingApplyHandler(APIHandler):
+    @tornado.web.authenticated
+    def post(self):
+        self.set_header("Content-Type", "application/json")
+        try:
+            payload = json.loads(self.request.body)
+            file_path = payload.get("file_path", "")
+            feature = payload.get("feature", "")
+            strategy = payload.get("strategy", "")
+            if not isinstance(file_path, str) or not file_path.strip():
+                raise ValueError("file_path must be a non-empty string.")
+            if not isinstance(feature, str) or not feature.strip():
+                raise ValueError("feature must be a non-empty string.")
+            if not isinstance(strategy, str) or not strategy.strip():
+                raise ValueError("strategy must be a non-empty string.")
+        except (json.JSONDecodeError, ValueError) as exc:
+            self.set_status(400)
+            self.finish(json.dumps({"error": str(exc)}))
+            return
+
+        path = _resolve_dataset_path(file_path.strip())
+        if not path.exists() or not path.is_file():
+            self.set_status(404)
+            self.finish(json.dumps({"error": "Dataset file not found.", "path": str(path)}))
+            return
+
+        try:
+            result = apply_preprocessing(path, feature=feature.strip(), strategy=strategy.strip())
+            # Include fresh dataset analysis
+            try:
+                result["dataset"] = analyze_dataset(path)
+            except Exception:
+                pass
+        except ValueError as exc:
+            self.set_status(400)
+            self.finish(json.dumps({"error": str(exc)}))
+            return
+        except Exception as exc:
+            self.set_status(500)
+            self.finish(json.dumps({"error": f"Apply failed: {str(exc)}"}))
+            return
+
+        self.finish(json.dumps(result))
+
+
+# =========================================================
+# PREPROCESSING UNDO HANDLER
+# =========================================================
+
+class PreprocessingUndoHandler(APIHandler):
+    @tornado.web.authenticated
+    def post(self):
+        self.set_header("Content-Type", "application/json")
+        try:
+            payload = json.loads(self.request.body)
+            file_path = payload.get("file_path", "")
+            if not isinstance(file_path, str) or not file_path.strip():
+                raise ValueError("file_path must be a non-empty string.")
+        except (json.JSONDecodeError, ValueError) as exc:
+            self.set_status(400)
+            self.finish(json.dumps({"error": str(exc)}))
+            return
+
+        path = _resolve_dataset_path(file_path.strip())
+        if not path.exists() or not path.is_file():
+            self.set_status(404)
+            self.finish(json.dumps({"error": "Dataset file not found.", "path": str(path)}))
+            return
+
+        try:
+            result = undo_preprocessing(path)
+            try:
+                result["dataset"] = analyze_dataset(path)
+            except Exception:
+                pass
+        except ValueError as exc:
+            self.set_status(400)
+            self.finish(json.dumps({"error": str(exc)}))
+            return
+        except Exception as exc:
+            self.set_status(500)
+            self.finish(json.dumps({"error": f"Undo failed: {str(exc)}"}))
+            return
+
+        self.finish(json.dumps(result))
+
+
+# =========================================================
+# ML MISTAKE DETECTOR HANDLER
+# =========================================================
+
+class MLMistakeCheckHandler(APIHandler):
+    @tornado.web.authenticated
+    def post(self):
+        self.set_header("Content-Type", "application/json")
+        try:
+            payload = json.loads(self.request.body)
+            code = str(payload.get("code", ""))[:50000]
+            level = str(payload.get("level", "Basic"))[:30]
+        except (json.JSONDecodeError, ValueError) as exc:
+            self.set_status(400)
+            self.finish(json.dumps({"error": str(exc)}))
+            return
+
+        try:
+            result = analyze_ml_mistakes(code=code, level=level)
+        except Exception as exc:
+            self.set_status(500)
+            self.finish(json.dumps({"error": f"ML check failed: {str(exc)}"}))
+            return
+
+        self.finish(json.dumps(result))
+
+
+# =========================================================
+# AI CHATBOT HANDLER
+# =========================================================
+
+class AIChatHandler(APIHandler):
+    @tornado.web.authenticated
+    async def post(self):
+        self.set_header("Content-Type", "application/json")
+        if len(self.request.body) > 65_536:
+            self.set_status(413)
+            self.finish(json.dumps({"error": "Chat request too large."}))
+            return
+
+        try:
+            payload = json.loads(self.request.body)
+            if not isinstance(payload, dict):
+                raise ValueError("Request body must be a JSON object.")
+            message = str(payload.get("message", "")).strip()[:4000]
+            if not message:
+                raise ValueError("message cannot be empty.")
+            provider = str(payload.get("provider", "ollama"))
+            if provider not in {"ollama", "gemini"}:
+                raise ValueError("provider must be 'ollama' or 'gemini'.")
+            history = payload.get("history", [])
+            if not isinstance(history, list):
+                history = []
+            context = payload.get("context", {})
+            if not isinstance(context, dict):
+                context = {}
+        except (json.JSONDecodeError, UnicodeDecodeError, ValueError) as err:
+            self.set_status(400)
+            self.finish(json.dumps({"error": str(err)}))
+            return
+
+        if provider == "gemini":
+            if not gemini_api_key_configured():
+                self.finish(json.dumps({
+                    "status": "gemini_unconfigured",
+                    "message": "Save a Gemini API key in the JupyterLab right sidebar's API Key tab to enable Gemini.",
+                }))
+                return
+            result = await chat_with_gemini(
+                message=message,
+                history=history,
+                context=context,
+            )
+        else:
+            result = await chat_with_ollama(
+                message=message,
+                history=history,
+                context=context,
+            )
+
+        self.finish(json.dumps(result))
+
+
+# =========================================================
+# AI DEBUGGER TUTOR HANDLER
+# =========================================================
+
+class DebuggerTutorHandler(APIHandler):
+    @tornado.web.authenticated
+    def post(self):
+        self.set_header("Content-Type", "application/json")
+        try:
+            payload = json.loads(self.request.body)
+            error_type = str(payload.get("error_type", ""))[:200]
+            error_message = str(payload.get("error_message", ""))[:2000]
+            traceback = str(payload.get("traceback", ""))[:12000]
+            code = str(payload.get("code", ""))[:20000]
+            level = str(payload.get("level", "basic"))
+            if not error_type:
+                raise ValueError("error_type is required.")
+        except (json.JSONDecodeError, ValueError) as exc:
+            self.set_status(400)
+            self.finish(json.dumps({"error": str(exc)}))
+            return
+
+        try:
+            result = analyze_error_for_tutor(
+                error_type=error_type,
+                error_message=error_message,
+                traceback=traceback,
+                code=code,
+                level=level,
+            )
+        except Exception as exc:
+            self.set_status(500)
+            self.finish(json.dumps({"error": str(exc)}))
+            return
+
+        self.finish(json.dumps(result))
+
+
+# =========================================================
+# MODEL RECOMMENDER HANDLER
+# =========================================================
+
+
+class ModelRecommendHandler(APIHandler):
+
+    @tornado.web.authenticated
+    def post(self):
+        self.set_header("Content-Type", "application/json")
+
+        try:
+            payload = json.loads(self.request.body)
+
+            if not isinstance(payload, dict):
+                raise ValueError(
+                    "Request body must be a JSON object."
+                )
+
+            file_path = payload.get("file_path", "")
+
+            if not isinstance(file_path, str):
+                raise ValueError(
+                    "file_path must be a string."
+                )
+
+            file_path = file_path.strip()
+
+            if not file_path:
+                raise ValueError(
+                    "file_path is required."
+                )
+
+            target_col = payload.get(
+                "target_col",
+                payload.get("target_column"),
+            )
+
+            if target_col is not None:
+                if not isinstance(target_col, str):
+                    raise ValueError(
+                        "target_col must be a string."
+                    )
+                target_col = target_col.strip() or None
+
+            evaluate = payload.get(
+                "evaluate_models",
+                False,
+            )
+
+            if not isinstance(evaluate, bool):
+                raise ValueError(
+                    "evaluate_models must be a boolean."
+                )
+
+            verified_code = payload.get(
+                "verified_code",
+                False,
+            )
+
+            if not isinstance(verified_code, bool):
+                raise ValueError(
+                    "verified_code must be a boolean."
+                )
+
+            if evaluate and verified_code:
+                raise ValueError(
+                    "Select either empirical evaluation "
+                    "or verified code generation, not both."
+                )
+
+            if evaluate:
+                if not target_col:
+                    raise ValueError(
+                        "Select a target column before "
+                        "running empirical evaluation."
+                    )
+
+                feature_columns = payload.get(
+                    "feature_columns"
+                )
+
+                if feature_columns is not None:
+                    if (
+                        not isinstance(feature_columns, list)
+                        or not all(
+                            isinstance(item, str)
+                            for item in feature_columns
+                        )
+                    ):
+                        raise ValueError(
+                            "feature_columns must be "
+                            "a list of strings."
+                        )
+
+                task = payload.get("task")
+
+                if task not in (
+                    None,
+                    "classification",
+                    "regression",
+                ):
+                    raise ValueError(
+                        "task must be classification "
+                        "or regression."
+                    )
+
+                cv_folds = payload.get(
+                    "cv_folds",
+                    5,
+                )
+
+                if (
+                    not isinstance(cv_folds, int)
+                    or isinstance(cv_folds, bool)
+                    or not 2 <= cv_folds <= 10
+                ):
+                    raise ValueError(
+                        "cv_folds must be "
+                        "an integer between 2 and 10."
+                    )
+
+                evaluate_scalers = payload.get(
+                    "evaluate_scalers",
+                    False,
+                )
+
+                if not isinstance(
+                    evaluate_scalers,
+                    bool,
+                ):
+                    raise ValueError(
+                        "evaluate_scalers must "
+                        "be a boolean."
+                    )
+
+        except (
+            json.JSONDecodeError,
+            UnicodeDecodeError,
+            ValueError,
+        ) as exc:
+            self.set_status(400)
+            self.finish(json.dumps({
+                "error": str(exc),
+            }))
+            return
+
+        # Resolve datasets against the trusted Jupyter
+        # Server workspace, never an HTTP-supplied root.
+        from .dataset_security import (
+            DatasetAccessError,
+            resolve_workspace_dataset,
+        )
+
+        contents_manager = self.settings.get(
+            "contents_manager"
+        )
+
+        workspace_root = getattr(
+            contents_manager,
+            "root_dir",
+            None,
+        )
+
+        if not workspace_root:
+            server_app = self.settings.get("serverapp")
+            workspace_root = getattr(
+                server_app,
+                "root_dir",
+                None,
+            )
+
+        if not workspace_root:
+            self.set_status(500)
+            self.finish(json.dumps({
+                "error": (
+                    "ModelMind could not determine the "
+                    "trusted Jupyter workspace root."
+                ),
+            }))
+            return
+
+        try:
+            path = resolve_workspace_dataset(
+                file_path,
+                workspace_root,
+            )
+        except DatasetAccessError as exc:
+            self.set_status(403)
+            self.finish(json.dumps({
+                "error": str(exc),
+            }))
+            return
+
+        try:
+            if evaluate:
+                from .evaluated_recommendation import (
+                    recommend_models_evaluated,
+                )
+
+                result = recommend_models_evaluated(
+                    path,
+                    target_column=target_col,
+                    feature_columns=feature_columns,
+                    task=task,
+                    cv_folds=cv_folds,
+                    evaluate_scalers=evaluate_scalers,
+                )
+
+                if not result.get("handled", False):
+                    self.set_status(400)
+
+            elif verified_code:
+                # Opt-in verified generated Python code.
+                # Original model rankings, scores and
+                # educational explanations are preserved.
+                from .verified_recommendation_adapter import (
+                    recommend_models_with_verified_code,
+                )
+
+                result = recommend_models_with_verified_code(
+                    path,
+                    target_col=target_col,
+                )
+
+                if not result.get("handled", False):
+                    self.set_status(400)
+
+            else:
+                # Original frontend behavior unchanged.
+                result = recommend_models(
+                    path,
+                    target_col=target_col,
+                )
+
+        except Exception as exc:
+            self.set_status(500)
+            self.finish(json.dumps({
+                "error": str(exc),
+            }))
+            return
+
+        self.finish(json.dumps(result))
+
+
+def setup_route_handlers(web_app):
+    from .background_evaluation_routes import (
+        EvaluationJobSubmitHandler,
+        EvaluationJobStatusHandler,
+        EvaluationJobCancelHandler,
+    )
+
+    host_pattern = ".*$"
+    base_url = web_app.settings["base_url"]
+
+    health_route_pattern = url_path_join(base_url, "api", "health")
+    gemini_api_key_route_pattern = url_path_join(base_url, "api", "settings", "gemini-key")
+    analyze_error_route_pattern = url_path_join(base_url, "api", "error", "analyze")
+    explain_error_route_pattern = url_path_join(base_url, "api", "ai", "explain")
+    local_ai_status_route_pattern = url_path_join(base_url, "api", "local-ai", "status")
+    local_ai_install_route_pattern = url_path_join(base_url, "api", "local-ai", "install")
+    local_ai_model_ensure_route_pattern = url_path_join(base_url, "api", "local-ai", "model", "ensure")
+    suggest_fix_route_pattern = url_path_join(base_url, "api", "ai", "fix")
+    code_help_route_pattern = url_path_join(base_url, "api", "ai", "code-help")
+    validate_fix_route_pattern = url_path_join(base_url, "api", "ai", "validate-fix")
+
+    # New routes
+    dataset_xray_route_pattern = url_path_join(base_url, "api", "dataset", "xray")
+    dataset_target_route_pattern = url_path_join(base_url, "api", "dataset", "target")
+    dataset_feature_route_pattern = url_path_join(base_url, "api", "dataset", "feature")
+    preprocessing_adviser_route_pattern = url_path_join(base_url, "api", "dataset", "preprocessing")
+    preprocessing_preview_route_pattern = url_path_join(base_url, "api", "dataset", "preprocessing", "preview")
+    preprocessing_apply_route_pattern = url_path_join(base_url, "api", "dataset", "preprocessing", "apply")
+    preprocessing_undo_route_pattern = url_path_join(base_url, "api", "dataset", "preprocessing", "undo")
+    ml_check_route_pattern = url_path_join(base_url, "api", "ai", "ml-check")
+    debugger_tutor_route_pattern = url_path_join(base_url, "api", "ai", "tutor")
+    ai_chat_route_pattern = url_path_join(base_url, "api", "ai", "chat")
+    model_recommend_route_pattern = url_path_join(base_url, "api", "dataset", "model-recommend")
+
+    from .background_tuning_routes import (
+        TuningJobSubmitHandler,
+        TuningJobStatusHandler,
+        TuningJobCancelHandler,
+    )
+
+    # ModelMind background evaluation endpoints
+    evaluation_submit_pattern = url_path_join(
+        base_url, "api", "dataset", "evaluation-jobs"
+    )
+    evaluation_status_pattern = url_path_join(
+        base_url,
+        "api",
+        "dataset",
+        "evaluation-jobs",
+        r"([a-f0-9]{32})",
+    )
+    evaluation_cancel_pattern = url_path_join(
+        base_url,
+        "api",
+        "dataset",
+        "evaluation-jobs",
+        r"([a-f0-9]{32})",
+        "cancel",
+    )
+
+    tuning_submit_pattern = url_path_join(
+        base_url, "api", "dataset", "tuning-jobs"
+    )
+    tuning_status_pattern = url_path_join(
+        base_url,
+        "api",
+        "dataset",
+        "tuning-jobs",
+        r"([a-f0-9]{32})",
+    )
+    tuning_cancel_pattern = url_path_join(
+        base_url,
+        "api",
+        "dataset",
+        "tuning-jobs",
+        r"([a-f0-9]{32})",
+        "cancel",
+    )
+
+    handlers = [
+        (health_route_pattern, HealthHandler),
+        (gemini_api_key_route_pattern, GeminiAPIKeyHandler),
+        (analyze_error_route_pattern, AnalyzeErrorHandler),
+        (explain_error_route_pattern, ExplainErrorHandler),
+        (local_ai_status_route_pattern, LocalAIStatusHandler),
+        (local_ai_install_route_pattern, LocalAIInstallHandler),
+        (local_ai_model_ensure_route_pattern, LocalAIModelEnsureHandler),
+        (suggest_fix_route_pattern, SuggestFixHandler),
+        (code_help_route_pattern, CodeHelpHandler),
+        (validate_fix_route_pattern, ValidateFixHandler),
+        # ── Dataset & ML Intelligence features ──
+        (dataset_xray_route_pattern, DatasetXRayHandler),
+        (dataset_target_route_pattern, DatasetTargetHandler),
+        (dataset_feature_route_pattern, DatasetFeatureHandler),
+        (preprocessing_adviser_route_pattern, PreprocessingAdviserHandler),
+        (preprocessing_preview_route_pattern, PreprocessingPreviewHandler),
+        (preprocessing_apply_route_pattern, PreprocessingApplyHandler),
+        (preprocessing_undo_route_pattern, PreprocessingUndoHandler),
+        (ml_check_route_pattern, MLMistakeCheckHandler),
+        (debugger_tutor_route_pattern, DebuggerTutorHandler),
+        (ai_chat_route_pattern, AIChatHandler),
+        (model_recommend_route_pattern, ModelRecommendHandler),
+        # ModelMind background evaluation
+        (
+            evaluation_submit_pattern,
+            EvaluationJobSubmitHandler,
+        ),
+        (
+            evaluation_cancel_pattern,
+            EvaluationJobCancelHandler,
+        ),
+        (
+            evaluation_status_pattern,
+            EvaluationJobStatusHandler,
+        ),
+    ]
+
+    handlers.extend([
+        (tuning_submit_pattern, TuningJobSubmitHandler),
+        (tuning_cancel_pattern, TuningJobCancelHandler),
+        (tuning_status_pattern, TuningJobStatusHandler),
+    ])
+
+    web_app.add_handlers(host_pattern, handlers)

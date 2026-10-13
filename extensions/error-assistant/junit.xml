@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites name="jest tests" tests="6" failures="0" errors="0" time="2.18">
+  <testsuite name="@ml-platform/error-assistant" errors="0" failures="0" skipped="0" timestamp="2026-10-13T13:55:37" time="1.569" tests="6">
+    <testcase classname="@ml-platform/error-assistant uses the Jupyter base URL and returns the server JSON response" name="@ml-platform/error-assistant uses the Jupyter base URL and returns the server JSON response" time="0.002">
+    </testcase>
+    <testcase classname="@ml-platform/error-assistant writes the suggested code through the cell shared model" name="@ml-platform/error-assistant writes the suggested code through the cell shared model" time="0">
+    </testcase>
+    <testcase classname="@ml-platform/error-assistant rejects a missing cell model or empty code suggestion" name="@ml-platform/error-assistant rejects a missing cell model or empty code suggestion" time="0">
+    </testcase>
+    <testcase classname="@ml-platform/error-assistant loads the selected dataset directly and inserts readable preprocessing code" name="@ml-platform/error-assistant loads the selected dataset directly and inserts readable preprocessing code" time="0.001">
+    </testcase>
+    <testcase classname="@ml-platform/error-assistant removes generated Model Advisor raise guards but keeps normal code" name="@ml-platform/error-assistant removes generated Model Advisor raise guards but keeps normal code" time="0">
+    </testcase>
+    <testcase classname="@ml-platform/error-assistant preserves baseline code and stores tuned code in tuned_code" name="@ml-platform/error-assistant preserves baseline code and stores tuned code in tuned_code" time="0.001">
+    </testcase>
+  </testsuite>
+</testsuites>
