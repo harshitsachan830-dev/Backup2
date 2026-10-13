@@ -1,9 +1,16 @@
+import { access, readFile } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const appDirectory = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const repositoryDirectory = resolve(appDirectory, "..");
+const backendDirectory = resolve(appDirectory, "backend");
+const apiPort = Number(process.env.MODELMIND_API_PORT ?? "8000");
+if (!Number.isInteger(apiPort) || apiPort < 1 || apiPort > 65535) {
+  throw new Error("MODELMIND_API_PORT must be a valid TCP port.");
+}
+const apiUrl = `http://127.0.0.1:${apiPort}`;
 const jupyterUrl =
   process.env.NEXT_PUBLIC_JUPYTER_URL ?? "http://127.0.0.1:8899";
 const jupyterAddress = new URL(jupyterUrl);
@@ -15,6 +22,12 @@ const platformScript =
   process.platform === "win32"
     ? resolve(repositoryDirectory, "scripts", "start-platform.ps1")
     : resolve(repositoryDirectory, "scripts", "start-platform.sh");
+const pythonExecutable =
+  process.platform === "win32"
+    ? resolve(repositoryDirectory, ".venv", "Scripts", "python.exe")
+    : resolve(repositoryDirectory, ".venv", "bin", "python");
+const mode = process.argv[2] ?? "dev";
+const runWebsite = mode !== "companion";
 
 async function isJupyterRunning() {
   try {
@@ -43,6 +56,68 @@ async function isJupyterRunning() {
     }
     throw error;
   }
+}
+
+async function isBackendRunning() {
+  try {
+    const response = await fetch(`${apiUrl}/health`, {
+      signal: AbortSignal.timeout(1500),
+    });
+    if (!response.ok) {
+      return false;
+    }
+
+    const body = await response.json();
+    return body?.status === "healthy";
+  } catch (error) {
+    if (
+      error instanceof TypeError &&
+      (error.cause?.code === "ECONNREFUSED" ||
+        error.cause?.code === "ECONNRESET")
+    ) {
+      return false;
+    }
+    throw error;
+  }
+}
+
+async function waitForService(name, isRunning, timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (await isRunning()) {
+      return;
+    }
+    await new Promise(resolveDelay => setTimeout(resolveDelay, 1000));
+  }
+  throw new Error(`${name} did not become ready before the startup timeout.`);
+}
+
+async function readLocalOriginSetting() {
+  if (process.env.MODELMIND_WEB_ORIGINS) {
+    return process.env.MODELMIND_WEB_ORIGINS;
+  }
+
+  try {
+    const envFile = await readFile(
+      resolve(repositoryDirectory, ".env"),
+      "utf8",
+    );
+    for (const line of envFile.split(/\r?\n/)) {
+      const match = line.match(/^\s*MODELMIND_WEB_ORIGINS\s*=\s*(.*?)\s*$/);
+      if (!match) {
+        continue;
+      }
+      const value = match[1].replace(/^(['"])(.*)\1$/, "$2").trim();
+      if (value) {
+        return value;
+      }
+    }
+  } catch (error) {
+    if (error.code !== "ENOENT") {
+      throw error;
+    }
+  }
+  return undefined;
 }
 
 function startChild(command, args, options) {
@@ -120,20 +195,54 @@ try {
         env: { ...process.env, PORT: String(jupyterPort) },
       });
     }
+    await waitForService("JupyterLab", isJupyterRunning, 10 * 60 * 1000);
   }
 
-  const nextCli = resolve(
-    appDirectory,
-    "node_modules",
-    "next",
-    "dist",
-    "bin",
-    "next",
-  );
-  startChild(process.execPath, [nextCli, process.argv[2] ?? "dev"], {
-    cwd: appDirectory,
-  });
+  if (await isBackendRunning()) {
+    console.log(`Using the existing local ModelMind API at ${apiUrl}.`);
+  } else {
+    await access(pythonExecutable);
+    const localOrigins = await readLocalOriginSetting();
+    console.log(`Starting the local ModelMind API at ${apiUrl}.`);
+    startChild(
+      pythonExecutable,
+      [
+        "-m",
+        "uvicorn",
+        "main:app",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        String(apiPort),
+      ],
+      {
+        cwd: backendDirectory,
+        env: {
+          ...process.env,
+          ...(localOrigins ? { MODELMIND_WEB_ORIGINS: localOrigins } : {}),
+          MODELMIND_API_PORT: String(apiPort),
+        },
+      },
+    );
+    await waitForService("ModelMind API", isBackendRunning, 60 * 1000);
+  }
+
+  if (runWebsite) {
+    const nextCli = resolve(
+      appDirectory,
+      "node_modules",
+      "next",
+      "dist",
+      "bin",
+      "next",
+    );
+    startChild(process.execPath, [nextCli, mode], {
+      cwd: appDirectory,
+    });
+  } else {
+    console.log("Local notebook services are ready. Press Ctrl+C to stop them.");
+  }
 } catch (error) {
-  console.error("Could not check the local Jupyter server:", error);
+  console.error("Could not start the local ModelMind services:", error);
   stop(1);
 }

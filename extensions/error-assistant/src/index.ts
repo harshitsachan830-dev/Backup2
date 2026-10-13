@@ -423,6 +423,7 @@ const plugin: JupyterFrontEndPlugin<void> = {
     };
 
     let analysisMode: 'explain' | 'suggest' = 'explain';
+    let ollamaConnected = false;
 
     content.appendChild(makePlaceholder());
 
@@ -479,21 +480,34 @@ const plugin: JupyterFrontEndPlugin<void> = {
           ollama.status === 'connected' &&
           ollama.model_status === 'available'
         ) {
+          ollamaConnected = true;
           localStatus.textContent = 'Ollama (Local AI)';
           localStatus.className =
             'ml-assistant-status-pill ml-assistant-status-success';
+          installButton.textContent = 'Model ready';
           installButton.disabled = true;
         } else if (ollama.status === 'connected') {
+          ollamaConnected = true;
           localStatus.textContent = 'Model missing';
           localStatus.className =
             'ml-assistant-status-pill ml-assistant-status-warn';
+          installButton.textContent = 'Install recommended model';
+          installButton.disabled = false;
+        } else {
+          ollamaConnected = false;
+          localStatus.textContent = 'Ollama not detected';
+          localStatus.className =
+            'ml-assistant-status-pill ml-assistant-status-warn';
+          installButton.textContent = 'Get Ollama';
           installButton.disabled = false;
         }
       } catch {
+        ollamaConnected = false;
         localStatus.textContent = 'Local AI unavailable';
         localStatus.className =
           'ml-assistant-status-pill ml-assistant-status-warn';
-        installButton.disabled = true;
+        installButton.textContent = 'Get Ollama';
+        installButton.disabled = false;
       }
     };
 
@@ -802,6 +816,11 @@ const plugin: JupyterFrontEndPlugin<void> = {
     });
 
     installButton.addEventListener('click', async () => {
+      if (!ollamaConnected) {
+        window.open('https://ollama.com/download', '_blank', 'noopener,noreferrer');
+        return;
+      }
+
       installButton.disabled = true;
       try {
         const result = await requestAPI<{
@@ -826,8 +845,27 @@ const plugin: JupyterFrontEndPlugin<void> = {
           });
           return;
         }
-      } catch {
-        // no-op; status remains visible to user
+        renderAssistantResult(content, {
+          errorType: 'Local model installation failed',
+          errorMessage: result.message || 'The recommended Ollama model could not be installed.',
+          traceback: 'No notebook code was sent to a cloud service.',
+          summary: 'ModelMind could not finish downloading the local model.',
+          details: [
+            'Check that Ollama is running and that this computer has an internet connection.',
+            'Retry after resolving the issue; the model is not installed until Ollama confirms it.'
+          ],
+          fix: 'Restart Ollama and retry the model installation.'
+        });
+      } catch (error) {
+        renderAssistantResult(content, {
+          errorType: 'Local model installation failed',
+          errorMessage:
+            error instanceof Error ? error.message : 'The local model request failed.',
+          traceback: 'No notebook code was sent to a cloud service.',
+          summary: 'ModelMind could not finish downloading the local model.',
+          details: ['Check the local Jupyter server and Ollama status, then retry.'],
+          fix: 'Restart the local ModelMind services and retry.'
+        });
       } finally {
         await setStatus();
       }

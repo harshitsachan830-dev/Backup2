@@ -18,7 +18,7 @@ if ($env:JUPYTER_CONFIG_PATH) {
 }
 
 if (Test-Path $envFile) {
-    $allowedSettings = @("ML_PLATFORM_CLOUD_FALLBACK", "GEMINI_API_KEY", "GEMINI_MODEL")
+    $allowedSettings = @("ML_PLATFORM_CLOUD_FALLBACK", "GEMINI_API_KEY", "GEMINI_MODEL", "MODELMIND_WEB_ORIGINS")
     foreach ($line in Get-Content $envFile) {
         $entry = $line.Trim()
         if (-not $entry -or $entry.StartsWith("#")) {
@@ -55,6 +55,7 @@ $extensionLink = Join-Path $venv "share\jupyter\labextensions\@ml-platform\error
 
 & $python -m pip install --upgrade pip
 & $python -m pip install -r (Join-Path $root "requirements.txt")
+& $python -m pip install -r (Join-Path $root "modelmind-source\backend\requirements.txt")
 if (Test-Path -LiteralPath $extensionLink) {
     $extensionItem = Get-Item -LiteralPath $extensionLink -Force
     if ($extensionItem.LinkType) {

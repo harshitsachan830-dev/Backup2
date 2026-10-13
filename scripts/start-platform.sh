@@ -16,7 +16,7 @@ if [[ -f "$ENV_FILE" ]]; then
     value="${value%$'\r'}"
     [[ -z "$key" || "$key" == \#* ]] && continue
     case "$key" in
-      ML_PLATFORM_CLOUD_FALLBACK|GEMINI_API_KEY|GEMINI_MODEL)
+      ML_PLATFORM_CLOUD_FALLBACK|GEMINI_API_KEY|GEMINI_MODEL|MODELMIND_WEB_ORIGINS)
         if [[ ${#value} -ge 2 && ( "$value" == \"*\" || "$value" == \'*\' ) ]]; then
           value="${value:1:${#value}-2}"
         fi
@@ -38,6 +38,7 @@ EXTENSION_LINK="$VENV_DIR/share/jupyter/labextensions/@ml-platform/error-assista
 
 "$PYTHON_BIN" -m pip install --upgrade pip
 "$PYTHON_BIN" -m pip install -r "$ROOT_DIR/requirements.txt"
+"$PYTHON_BIN" -m pip install -r "$ROOT_DIR/modelmind-source/backend/requirements.txt"
 if [[ -L "$EXTENSION_LINK" ]]; then
   unlink "$EXTENSION_LINK"
 fi

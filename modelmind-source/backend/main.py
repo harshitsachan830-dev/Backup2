@@ -1,3 +1,6 @@
+import os
+from urllib.parse import urlsplit
+
 from fastapi import (
     FastAPI,
     File,
@@ -5,6 +8,7 @@ from fastapi import (
     UploadFile,
 )
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from runtime.packages import (
     installed_packages,
@@ -41,17 +45,55 @@ app = FastAPI(
     version="0.3.0",
 )
 
+configured_origins = os.environ.get("MODELMIND_WEB_ORIGINS") or None
+if configured_origins is not None:
+    allowed_web_origins = [
+        origin.strip().rstrip("/")
+        for origin in configured_origins.split(",")
+        if origin.strip()
+    ]
+    if not allowed_web_origins:
+        raise ValueError("MODELMIND_WEB_ORIGINS must contain at least one website origin.")
+else:
+    allowed_web_origins = [
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+    ]
+
+for origin in allowed_web_origins:
+    parsed_origin = urlsplit(origin)
+    if (
+        parsed_origin.scheme not in {"http", "https"}
+        or not parsed_origin.netloc
+        or parsed_origin.path
+        or parsed_origin.query
+        or parsed_origin.fragment
+        or parsed_origin.username
+        or parsed_origin.password
+        or "*" in origin
+    ):
+        raise ValueError(
+            "MODELMIND_WEB_ORIGINS must contain comma-separated HTTP(S) origins without paths or wildcards."
+        )
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-    ],
-    allow_credentials=True,
+    allow_origins=allowed_web_origins,
+    allow_credentials=False,
     allow_methods=["*"],
-    allow_headers=["*"],
+    allow_headers=["Content-Type", "Authorization"],
 )
+
+
+@app.middleware("http")
+async def enforce_local_web_origin(request, call_next):
+    origin = request.headers.get("origin")
+    if origin is not None and origin not in allowed_web_origins:
+        return JSONResponse(
+            status_code=403,
+            content={"detail": "This website is not allowed to use the local ModelMind runtime."},
+        )
+    return await call_next(request)
 
 
 # ==========================================

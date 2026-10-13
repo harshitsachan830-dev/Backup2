@@ -39,7 +39,7 @@ if (Get-Command ollama -ErrorAction SilentlyContinue) {
 }
 
 if (Test-Path $python) {
-    & $python -m pytest "extensions/error-assistant/ml_platform_error_assistant/tests" -q
+    & $python -m pytest "extensions/error-assistant" -q
 } else {
     Write-Host "Python venv is missing; run the venv bootstrap before release checks."
     throw "Release-check could not execute because the repo Python environment is absent."

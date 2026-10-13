@@ -130,17 +130,17 @@ Supabase, using a server-side ownership check tied to the MongoDB session.
 Dataset metadata and a private Storage bucket are provisioned, but dataset
 upload is not yet wired to the UI.
 Notebook contents remain in the local Jupyter environment and are not
-cloud-synced. This setup does not yet provide separate hosted notebooks to
-production users.
+cloud-synced. In this deployment design, the website connects to the user's
+local notebook companion; it does not provide a shared hosted notebook
+runtime.
 
 ### D. Deploy the website
 
 1. Push the project to a Git provider and import it into a Next.js hosting
-   service such as Vercel. Set the project root to the folder containing this
-   `package.json`.
-2. Configure all variables from `.env.local.example` in the hosting provider.
-   Mark MongoDB, Brevo, OTP hash, Supabase service-role, and Razorpay values
-   as secrets.
+   service such as Vercel. Set the project root to `modelmind-source`.
+2. Configure the website URLs from `.env.local.example` and the server-side
+   authentication, database, email, Supabase, and payment variables described
+   above in the hosting provider. Mark all server-side credentials as secrets.
 3. Deploy, then test code delivery, verification, password creation and
    sign-in, the other-device confirmation, session persistence, logout,
    project creation, and access isolation. Confirm an unauthenticated user
@@ -151,13 +151,25 @@ continue to derive the owner ID from the validated MongoDB session and filter
 or insert only that owner's records. Never call the admin client from browser
 code. Do not disable RLS.
 
-### E. Plan hosted notebooks separately
+### E. Keep the notebook runtime on each user's computer
 
-`npm run dev` starts Jupyter on your own computer for development. It is not
-safe or suitable as the shared notebook service for 100–200 production users.
-Before launch, choose a hosted notebook provider or isolated per-user
-containers with authentication, storage, CPU/memory limits, and idle shutdown.
-Do not expose one shared Jupyter server to all users.
+Deploy the Next.js website separately from the Jupyter/Python runtime. Set the
+hosting provider's project root to `modelmind-source`, build with
+`npm run build`, and use `npm start` to serve only the website. Never start
+Jupyter or the Python execution API on the public website host.
+
+The website talks to a local companion on the user's own computer. The
+companion starts the Python API on `127.0.0.1:8000` and customized JupyterLab
+on `127.0.0.1:8899`. The API checks the browser `Origin` against the exact
+deployed website origin in the companion's `MODELMIND_WEB_ORIGINS` setting.
+Set it in the local project-root `.env` file, then restart the companion. Do
+not use a wildcard or expose either local port publicly.
+Notebook code runs as the local user's account, so this local runtime is not a
+sandbox for untrusted code.
+
+The current preview companion still requires Node.js, Python, and a checkout
+of this project. Signed one-click installers and browser localhost-permission
+validation remain follow-up release work.
 
 ## Run locally
 
@@ -166,14 +178,16 @@ npm install
 npm run dev
 ```
 
-`npm run dev` starts both the ModelMind dashboard and the local JupyterLab
-server. JupyterLab opens an authenticated browser session automatically; keep
-the terminal running while using ModelMind. If JupyterLab is already running
-at the configured URL, the dashboard reuses it. Set
-`NEXT_PUBLIC_JUPYTER_URL` to use a different local Jupyter URL. Open
-[http://localhost:3000](http://localhost:3000).
-For a production build, run `npm run build`; `npm start` also starts the local
-JupyterLab server alongside the dashboard.
+`npm run dev` starts the local Python API, customized JupyterLab, and the
+development dashboard. JupyterLab opens an authenticated browser session;
+keep the terminal running while using ModelMind. To run only the local Python
+API and JupyterLab alongside the hosted website, use `npm run companion`.
+JupyterLab starts at `http://127.0.0.1:8899`; the API listens at
+`http://127.0.0.1:8000`. Set `NEXT_PUBLIC_JUPYTER_URL` or
+`MODELMIND_API_PORT` only when you need different local ports. Configure
+`MODELMIND_WEB_ORIGINS` in the companion environment to your exact deployed
+website origin. For the website, run `npm run build` and then `npm start`;
+that production command does not start local services.
 
 ## Notebook AI credentials
 
@@ -187,7 +201,9 @@ safeguards. Gemini error-fix suggestions also require cloud fallback to be
 enabled on the Jupyter server and the **Allow Gemini use** opt-in in Error
 Assistant.
 
-When running the local dashboard with `npm run dev` or `npm start`, JupyterLab
-starts automatically and opens its authenticated local session. The standalone
-platform launcher remains available for running JupyterLab without the
-dashboard. Never share the tokenized Jupyter URL.
+When running the local dashboard with `npm run dev`, JupyterLab starts
+automatically and opens its authenticated local session. The standalone
+platform launcher remains available for JupyterLab setup. If Ollama is
+missing, **Get Ollama** opens its official download page; after installing and
+starting Ollama, use **Install recommended model** to download the model with
+your approval. Never share the tokenized Jupyter URL.

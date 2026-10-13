@@ -38,9 +38,9 @@ else
 fi
 
 if [[ -x "$PYTHON_BIN" ]]; then
-  "$PYTHON_BIN" -m pytest extensions/error-assistant/ml_platform_error_assistant/tests -q
+  "$PYTHON_BIN" -m pytest extensions/error-assistant -q
 else
-  python3 -m pytest extensions/error-assistant/ml_platform_error_assistant/tests -q
+  python3 -m pytest extensions/error-assistant -q
 fi
 
 printf '\nSecurity and release gates checklist:\n'

@@ -11,6 +11,7 @@ import math
 import time
 
 import pandas as pd
+import pytest
 
 from sklearn.datasets import make_classification, make_regression
 
@@ -18,6 +19,30 @@ from ml_platform_error_assistant.fast_hyperparameter_tuner import (
     tune_top_five,
 )
 from ml_platform_error_assistant.model_evaluator import evaluate_models
+
+
+TOP_FIVE_CASES = [
+    (
+        "classification",
+        [
+            "Logistic Regression",
+            "Decision Tree",
+            "Random Forest",
+            "K-Nearest Neighbors",
+            "Gaussian Naive Bayes",
+        ],
+    ),
+    (
+        "regression",
+        [
+            "Linear Regression",
+            "Ridge Regression",
+            "Decision Tree",
+            "Random Forest",
+            "K-Nearest Neighbors",
+        ],
+    ),
+]
 
 
 def build_data(task):
@@ -44,6 +69,7 @@ def build_data(task):
     return frame, columns
 
 
+@pytest.mark.parametrize(("task", "names"), TOP_FIVE_CASES)
 def test_top_five(task, names):
     frame, features = build_data(task)
 
@@ -72,12 +98,9 @@ def test_top_five(task, names):
         assert item["model"] in names
         assert item["model"] not in seen
         seen.add(item["model"])
+        assert 1 <= item["configurations_tested"] <= 8
 
-        # Basic Smart Tuning tests up to 8 configurations,
-# including the original default configuration.
-    assert 1 <= item["configurations_tested"] <= 8
-
-    for attempt in item["attempts"]:
+        for attempt in item["attempts"]:
             if attempt["status"] == "success":
                 assert attempt["score"] is not None
                 assert math.isfinite(attempt["score"])
@@ -209,27 +232,8 @@ def test_matches_model_advisor_baselines():
 
 
 if __name__ == "__main__":
-    test_top_five(
-        "classification",
-        [
-            "Logistic Regression",
-            "Decision Tree",
-            "Random Forest",
-            "K-Nearest Neighbors",
-            "Gaussian Naive Bayes",
-        ],
-    )
-
-    test_top_five(
-        "regression",
-        [
-            "Linear Regression",
-            "Ridge Regression",
-            "Decision Tree",
-            "Random Forest",
-            "K-Nearest Neighbors",
-        ],
-    )
+    for case in TOP_FIVE_CASES:
+        test_top_five(*case)
 
     test_validation()
     test_matches_model_advisor_baselines()

@@ -1,0 +1,157 @@
+# ML Notebook Platform
+
+A cross-platform ML notebook product built on JupyterLab and Jupyter Server. The notebook remains the standard Jupyter experience; product features are added through a small JupyterLab frontend extension and an authenticated Jupyter Server extension.
+
+The notebook application is branded **ModelMind Notebook** with the supplied ModelMind logo, including the startup splash and browser tab. The Jupyter startup orbit animation is hidden. The Error Assistant opens in a polished side panel with clear error summaries, readable explanations, collapsible tracebacks, and separate controls for suggesting, copying, and applying fixes. JupyterLab's built-in Help links, update/news settings, and required third-party attribution remain enabled.
+
+The target product adds an error assistant that diagnoses notebook failures, uses local Ollama first for complex explanations, optionally routes to Gemini through a secured backend, and only offers code changes after sandbox validation. The website is hosted; Jupyter, Python execution, and optional Ollama run on each user's computer through a local companion. A browser-only page cannot silently install software on a user's computer.
+
+## Status
+
+**Local notebook and Ollama flows are implemented and tested on the developer Mac.** Gemini code-fix fallback requires two opt-ins: the server must set `ML_PLATFORM_CLOUD_FALLBACK=enabled` and have a Gemini key configured, and the user must check **Allow Gemini fallback** in the assistant. Ollama remains first; Gemini is contacted only after Ollama cannot provide a valid fix. The UI warns that code, traceback, and adjacent cell context can be sent to Google. No credential is sent to the browser. A live key/model check and one generation call succeeded with `gemini-3.8-flash`; a later call returned a transient 503, and an ambiguous NameError test produced a syntactically valid but semantically poor suggestion. Suggestions still require review; OS certification is pending.
+
+See [context.md](context.md) for the report-derived phase checklist, implementation decisions, verified environment facts, and next action. Update it and this README whenever a phase, dependency pin, security decision, or supported-platform result changes.
+
+## Requirements
+
+- Python with `venv` and `pip`. The developer machine currently has Python 3.14.2; the project's minimum supported Python version has not yet been certified.
+- Node.js and npm are needed to develop/build the frontend extension. The developer Mac has Node.js 24.11.1 and npm 11.6.2.
+- macOS or Windows for the first local companion target. Linux packaging is a later, explicitly tested target.
+- Ollama is required for the optional local explanation path. The manifest records a recommended model, and explicit user approval is required before the app triggers a local `ollama pull`.
+
+## Start the platform locally
+
+Use the project launcher scripts for a standard local start.
+
+macOS / Linux:
+
+```sh
+./scripts/start-platform.sh
+```
+
+Windows PowerShell:
+
+```powershell
+.\scripts\start-platform.ps1
+```
+
+The launcher creates or updates the local virtual environment, installs the pinned project requirements, local API dependencies, and JupyterLab extensions, and starts JupyterLab with a local workspace. The branding settings in `jupyter-config` use the project logo and set the browser tab title; the startup customization hides JupyterLab's orbit animation. It opens JupyterLab in your browser using the server's newly generated local login token, so you do not need to copy or enter a token. Keep the launcher running while using the notebook. Jupyter and the Python API listen only on your own computer; do not expose their ports to the internet or share the tokenized URL. Ollama and its model are not silently installed. If Ollama is missing, the Error Assistant directs you to its official installer; once Ollama is installed and started, you can approve the recommended model download.
+
+## Start the stock notebook baseline
+
+Run these commands from the repository root.
+
+macOS / Linux:
+
+```sh
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
+python -m pip install -e extensions/error-assistant
+export JUPYTER_CONFIG_PATH="$PWD/jupyter-config${JUPYTER_CONFIG_PATH:+:$JUPYTER_CONFIG_PATH}"
+jupyter lab
+```
+
+Windows PowerShell:
+
+```powershell
+py -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
+python -m pip install -e extensions/error-assistant
+$env:JUPYTER_CONFIG_PATH = "$(Get-Location)\jupyter-config;$env:JUPYTER_CONFIG_PATH"
+jupyter lab
+```
+
+JupyterLab opens in the browser when the launcher starts. The Error Assistant command is in the View menu; it opens the right-side panel and checks authenticated platform, Ollama, recommended-model, and Gemini fallback status. Select a failed cell and choose **Explain Error** or **Suggest Fix**. Choose **Ollama (local)** or **Gemini (cloud)** from **Fix provider**; Gemini requires both server configuration and the explicit **Allow Gemini use** opt-in. With Ollama selected, that opt-in also permits Gemini fallback if Ollama cannot provide a valid suggestion. The selected provider requests a complete corrected cell and rejects responses that appear to contain only a partial patch. **Apply Fix** remains a separate action that replaces and reruns the cell, so review the full suggested code first. Choose **Code Help** or **Ask AI** to ask local Ollama about the selected cell. When Gemini is used, the cell code, traceback, and adjacent code are sent to Google.
+
+To configure Gemini on a personal desktop, open the **API Key** tab in the JupyterLab right sidebar and save the key there. The extension stores it with Python `keyring` in the operating system's credential store (such as macOS Keychain or Windows Credential Manager); the key is never returned to the browser or written into a notebook. A personal key saved in the panel takes precedence over `GEMINI_API_KEY` or `GOOGLE_API_KEY` from the Jupyter server environment; removing the personal key returns to the environment key, if present. The root `.env` file remains available for server-managed deployments and is ignored by Git.
+
+Automatic Gemini fallback for fixes remains disabled unless `ML_PLATFORM_CLOUD_FALLBACK=enabled` is set. A per-session **Allow Gemini use** opt-in is still required before notebook code and error context can be sent to Google for a fix. Chat requests use Gemini only after the user selects the Gemini provider.
+
+```dotenv
+ML_PLATFORM_CLOUD_FALLBACK=enabled
+# Optional for server-managed deployments; local desktop users can use API Key in JupyterLab.
+GEMINI_API_KEY=paste-your-key-here
+GEMINI_MODEL=gemini-3.8-flash
+```
+
+Restart JupyterLab after editing `.env`. Leaving the fallback setting unset or set to `disabled` prevents automatic Gemini fix fallback.
+
+The backend checks Ollama at `127.0.0.1:11434` with bounded timeouts and a 64 KiB response limit. The manifest is [model-manifest.json](extensions/error-assistant/ml_platform_error_assistant/model-manifest.json). This Mac is an M4 with 16 GB unified memory; Ollama reports version `0.35.0`, and the recommended model can be installed only through the explicit user-approved install flow or a manual `ollama pull` command. Nothing is downloaded silently.
+
+Current checks: production build succeeds; the Python suite passes, the install-gate tests pass, and the local AI path is verified with the model installed. Browser verification continues to report nonfatal JupyterLab shared-package patch-version warnings; resolve or regression-test before a release candidate. See [context.md](context.md) for details.
+
+## Build phases
+
+1. **Baseline:** freeze JupyterLab/Jupyter Server versions; create an isolated environment and verify normal notebook behavior.
+2. **Jupyter integration:** add the Error Assistant command/panel, authenticated server extension endpoints, and normalized notebook error capture.
+3. **Diagnostics and local AI:** add deterministic Python/Pandas/NumPy/scikit-learn diagnostics, Ollama health/model checks, and structured local explanations.
+4. **Safe fixes:** generate candidate patches, validate them in a disposable execution context, show a diff, and preserve the original cell unless the user explicitly applies a passing fix.
+5. **Local companion and cloud fallback:** build the macOS/Windows companion installer and Ollama setup flow; Gemini fix fallback is server-side, bounded, and disabled unless both the deployment and user opt in.
+6. **Install and enable flow:** add explicit user approval before any model pull; document the local installer scripts and the route-based ensure flow.
+7. **Release readiness:** test OS failure/recovery paths, notebook security boundaries, resource limits, attribution, and packaging before considering automatic updates.
+
+The report's detailed sequence and acceptance criteria are tracked in [context.md](context.md). The explicit installer flow now guards model installation behind user approval; cloud routing remains disabled until later gates are completed.
+
+## Local install & enable flow
+
+The project ships with explicit installer helpers for the local model path:
+
+- macOS/Linux: `scripts/install-ollama.sh`
+- Windows PowerShell: `scripts/install-ollama.ps1`
+
+These scripts do not auto-download anything. They check whether Ollama and the recommended model are present, and they only invoke `ollama pull` when the user runs the script intentionally. The backend API exposes the same policy through authenticated routes:
+
+- `POST /api/local-ai/install`
+- `POST /api/local-ai/model/ensure`
+
+Both routes require explicit approval through the `allow_download` flag before a model pull is attempted.
+
+## Hosted website with a local notebook companion
+
+Deploy only the Next.js application in `modelmind-source` to a Node.js host
+such as Vercel. Set the provider's project root to `modelmind-source`, build
+with `npm run build`, and start with `npm start`. The production start command
+serves the website only; do not run Jupyter or the Python execution API on the
+public web host.
+
+For local development, run `npm run dev` from `modelmind-source`. The launcher
+starts the local Jupyter server and Python API before the dashboard. To run
+only the per-user local services alongside the hosted website, run
+`npm run companion` from that same folder. It keeps both services running
+until you stop it with Ctrl+C. The preview companion currently requires the
+project checkout, Node.js, and Python; signed one-click installers are not
+available yet.
+
+The local API binds to `127.0.0.1` and checks browser origins. Before allowing
+the deployed site, set the exact website origin in the root `.env` file:
+
+```dotenv
+MODELMIND_WEB_ORIGINS=https://your-real-modelmind-domain.example
+```
+
+Do not include a path, wildcard, or trailing slash. This local-service
+allowlist is not a replacement for operating-system isolation: notebook code
+can access files and services available to the signed-in computer account.
+Do not expose ports `8000` or `8899` publicly. The hosted website can use
+local notebooks only while the companion is running in the user's browser
+environment. Test browser localhost/network permission prompts on every
+supported browser before launch.
+
+Installing the Ollama application and installing its model are separate
+steps. When Ollama is missing, the Error Assistant opens Ollama's official
+download page. After installing and starting Ollama, the user can explicitly
+approve downloading the recommended model.
+
+## Non-negotiable product constraints
+
+- Jupyter remains the notebook engine. Keep its editor, execution model, file browser, kernel status, output, terminal, and document behavior intact.
+- The frontend never receives model credentials or calls model-specific APIs directly.
+- Send only bounded, relevant error context to an AI service. Never automatically send secrets, environment variables, unrelated files, or all notebook outputs.
+- Deterministic diagnoses should not trigger Gemini. Cloud use is disabled by default via `ML_PLATFORM_CLOUD_FALLBACK`; a remote fix also requires a server-side API key and explicit per-session UI consent.
+- Never present an AI-generated patch as applicable until sandbox validation passes; show the diff and require user action.
+- Untrusted notebook execution requires isolation, resource limits, restricted filesystem/network access, and secret isolation before multi-user deployment.
+- Preserve Jupyter's required notices and licenses; review Ollama and model licenses before distribution.
