@@ -6,6 +6,9 @@ import { fileURLToPath } from "node:url";
 const appDirectory = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const repositoryDirectory = resolve(appDirectory, "..");
 const backendDirectory = resolve(appDirectory, "backend");
+const virtualEnvironmentDirectory = resolve(
+  process.env.MODELMIND_VENV_DIR ?? resolve(repositoryDirectory, ".venv"),
+);
 const apiPort = Number(process.env.MODELMIND_API_PORT ?? "8000");
 if (!Number.isInteger(apiPort) || apiPort < 1 || apiPort > 65535) {
   throw new Error("MODELMIND_API_PORT must be a valid TCP port.");
@@ -24,8 +27,8 @@ const platformScript =
     : resolve(repositoryDirectory, "scripts", "start-platform.sh");
 const pythonExecutable =
   process.platform === "win32"
-    ? resolve(repositoryDirectory, ".venv", "Scripts", "python.exe")
-    : resolve(repositoryDirectory, ".venv", "bin", "python");
+    ? resolve(virtualEnvironmentDirectory, "Scripts", "python.exe")
+    : resolve(virtualEnvironmentDirectory, "bin", "python");
 const mode = process.argv[2] ?? "dev";
 const runWebsite = mode !== "companion";
 

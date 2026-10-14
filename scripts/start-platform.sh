@@ -2,10 +2,11 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-VENV_DIR="${VENV_DIR:-$ROOT_DIR/.venv}"
+USER_DATA_DIR="${MODELMIND_USER_DATA_DIR:-$ROOT_DIR}"
+VENV_DIR="${MODELMIND_VENV_DIR:-${VENV_DIR:-$ROOT_DIR/.venv}}"
 PORT="${PORT:-8899}"
 WORKSPACE="${WORKSPACE:-$ROOT_DIR}"
-ENV_FILE="$ROOT_DIR/.env"
+ENV_FILE="$USER_DATA_DIR/.env"
 export MODELMIND_JUPYTER_PORT="$PORT"
 export JUPYTER_CONFIG_PATH="$ROOT_DIR/jupyter-config${JUPYTER_CONFIG_PATH:+:$JUPYTER_CONFIG_PATH}"
 
@@ -28,7 +29,14 @@ fi
 
 if [[ ! -x "$VENV_DIR/bin/python" ]]; then
   echo "Creating local virtual environment at $VENV_DIR"
-  python3 -m venv "$VENV_DIR"
+  mkdir -p "$(dirname "$VENV_DIR")"
+  if [[ -x "$ROOT_DIR/runtime/python/bin/python3" ]]; then
+    "$ROOT_DIR/runtime/python/bin/python3" -m venv "$VENV_DIR"
+  elif [[ -x "$ROOT_DIR/runtime/python/bin/python3.12" ]]; then
+    "$ROOT_DIR/runtime/python/bin/python3.12" -m venv "$VENV_DIR"
+  else
+    python3 -m venv "$VENV_DIR"
+  fi
 fi
 
 PYTHON_BIN="$VENV_DIR/bin/python"

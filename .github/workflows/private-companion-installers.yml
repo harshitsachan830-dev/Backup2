@@ -1,0 +1,102 @@
+name: Build private companion installers
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "private-companion-v*"
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    name: Package ${{ matrix.asset }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macOS
+            runner: macos-26
+            suffix: macOS-arm64
+            asset: ModelMind-Setup-macOS-arm64.pkg
+          - platform: macOS
+            runner: macos-26-intel
+            suffix: macOS-x64
+            asset: ModelMind-Setup-macOS-x64.pkg
+          - platform: Windows
+            runner: windows-latest
+            suffix: Windows-x64
+            asset: ModelMind-Setup-Windows-x64.exe
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Validate and build macOS installer
+        if: matrix.platform == 'macOS'
+        env:
+          MODELMIND_PACKAGE_SUFFIX: ${{ matrix.suffix }}
+        run: |
+          bash -n scripts/start-beta-macos.command
+          bash -n scripts/start-platform.sh
+          bash scripts/package-private-macos.sh
+      - name: Validate and build Windows installer
+        if: matrix.platform == 'Windows'
+        shell: pwsh
+        env:
+          MODELMIND_PACKAGE_SUFFIX: ${{ matrix.suffix }}
+        run: |
+          $tokens = $null
+          $errors = $null
+          $files = @(
+            "scripts/start-beta-windows.ps1",
+            "scripts/start-platform.ps1",
+            "scripts/package-private-windows.ps1"
+          )
+          foreach ($file in $files) {
+            $tokens = $null
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile(
+              (Join-Path $PWD $file),
+              [ref]$tokens,
+              [ref]$errors
+            ) | Out-Null
+            if ($errors.Count -gt 0) {
+              throw ($errors | Out-String)
+            }
+          }
+          & scripts/package-private-windows.ps1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset }}
+          path: ${{ runner.temp }}/${{ matrix.asset }}
+          if-no-files-found: error
+          retention-days: 7
+
+  release:
+    name: Publish private prototype installers
+    if: startsWith(github.ref, 'refs/tags/private-companion-v')
+    needs: package
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          pattern: ModelMind-Setup-*
+          merge-multiple: true
+      - name: Create private prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" release-assets/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --prerelease \
+            --title "ModelMind private companion prototype $GITHUB_REF_NAME" \
+            --notes "Unsigned installers for staging validation only. These private prototype packages include application files and bundled Node.js/Python runtimes. Jupyter packages install on first launch. Do not distribute publicly."

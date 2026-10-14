@@ -32,10 +32,10 @@ folder, and run its platform start script:
   the unsigned script, Control-click it, choose **Open**, and confirm.
 
 The first start checks for Node.js 20.9 or newer and Python 3, installs the
-website's locked Node dependencies and the local Python/Jupyter dependencies,
-then opens the hosted ModelMind staging dashboard. Installation can take several
-minutes and requires an internet connection. Keep the terminal window open
-while using ModelMind; press Ctrl+C there to stop the local notebook services.
+local Python/Jupyter dependencies, then opens the hosted ModelMind staging
+dashboard. Installation can take several minutes and requires an internet
+connection. Keep the terminal window open while using ModelMind; press Ctrl+C
+there to stop the local notebook services.
 If a prerequisite is missing, install Node.js from
 [nodejs.org](https://nodejs.org/en/download) or Python from
 [python.org](https://www.python.org/downloads/), then run the script again.
@@ -47,6 +47,22 @@ release. Ollama is optional and must be installed separately. The recommended
 model is never downloaded without user approval. Gemini use requires the user
 to save their own key in the notebook's API Key panel and explicitly enable
 cloud use when prompted.
+
+### Private companion installer prototypes
+
+The `private-companion-v*` workflow builds unsigned Windows x64 and macOS
+Intel/Apple Silicon `.exe`/`.pkg` installers for staging tests. These packages
+include Node.js and Python runtimes, keep notebooks and the virtual environment
+in the user's writable folders, and download Jupyter/Python packages the first
+time they are opened.
+They still include application files and are published only as private
+prereleases; do not share them publicly. They point to the staging website and
+are not a production release. Public distribution requires a production
+website URL, signed/notarized installers, and end-to-end testing on clean
+Windows and macOS computers. Optional server-managed Gemini settings go in
+`%LOCALAPPDATA%\ModelMind\.env` on Windows or
+`~/Library/Application Support/ModelMind/.env` on macOS; never put secrets in
+the installer or repository.
 
 ## Start the platform locally
 

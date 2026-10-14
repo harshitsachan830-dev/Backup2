@@ -101,16 +101,16 @@ the entitlement. Webhook signatures are also verified. Razorpay's `payment
 captured` event is useful if the browser closes before returning from checkout.
 Do not manually create enrollment records to grant access.
 
-For free demos, the purchase page also displays the `MODELMIND108` coupon by
-default. Click **Apply** to see the ₹99 discount and ₹0 total, then click
-**Get one month free**. The server validates the coupon and records a
+An optional one-month demo coupon can be configured using the server-only
+`MODELMIND_FREE_COUPON` setting. Leave it unset or empty for the paid launch;
+no free coupon is enabled by default. When configured, the purchase page
+displays the code. Click **Apply** to see the ₹99 discount and ₹0 total, then
+click **Get one month free**. The server validates the coupon and records a
 zero-rupee entitlement for one calendar month from redemption; Razorpay is not
 opened. After expiry, the account is sent back to the purchase page, including
 if it is still on the dashboard when the month ends. Redeeming the code again
-starts a new one-month demo period.
-You can change the code using the server-only `MODELMIND_FREE_COUPON` setting,
-or set it to an empty value to disable coupons. This default coupon is public
-and grants free access, so disable or change it before charging real users.
+starts a new one-month demo period. Treat any configured coupon as public and
+shareable.
 
 ### C. Create the database tables safely
 

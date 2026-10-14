@@ -25,7 +25,7 @@ export default function JupyterWorkspace() {
           rel="noreferrer"
           target="_blank"
         >
-          Download the Windows/macOS companion
+          Download the private Windows/macOS staging installer
         </a>
         <p className="jupyterLocalAddress">
           Local companion: <code>{API_URL}</code>
@@ -42,8 +42,9 @@ export default function JupyterWorkspace() {
           </p>
         </div>
         <p className="jupyterLocalAddress">
-          If the companion is not running, start it with the Windows or macOS
-          script from the extracted beta package and keep its terminal open.
+          If the companion is not running, launch ModelMind from the Start menu
+          on Windows or Applications on macOS. Keep its terminal window open
+          while using JupyterLab.
         </p>
       </section>
     </main>

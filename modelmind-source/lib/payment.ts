@@ -124,11 +124,7 @@ function addOneCalendarMonth(from: Date): Date {
 }
 
 export function getFreeCouponCode(): string | null {
-  const couponCode = (
-    process.env.MODELMIND_FREE_COUPON ?? "MODELMIND108"
-  )
-    .trim()
-    .toUpperCase();
+  const couponCode = process.env.MODELMIND_FREE_COUPON?.trim().toUpperCase();
   return couponCode || null;
 }
 

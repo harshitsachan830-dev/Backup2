@@ -7,9 +7,22 @@ param(
 $ErrorActionPreference = "Stop"
 
 $root = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
-$venv = Join-Path $root ".venv"
-$envFile = Join-Path $root ".env"
+$userDataDirectory = if ($env:MODELMIND_USER_DATA_DIR) {
+    $env:MODELMIND_USER_DATA_DIR
+} else {
+    $root
+}
+$venv = if ($env:MODELMIND_VENV_DIR) {
+    $env:MODELMIND_VENV_DIR
+} else {
+    Join-Path $root ".venv"
+}
+$envFile = Join-Path $userDataDirectory ".env"
 $configPath = Join-Path $root "jupyter-config"
+$packagedPython = Join-Path $root "runtime\python\python.exe"
+if ((Test-Path $packagedPython) -and $PythonExe -eq "py") {
+    $PythonExe = $packagedPython
+}
 
 $env:MODELMIND_JUPYTER_PORT = $Port
 
@@ -17,6 +30,10 @@ if ($env:JUPYTER_CONFIG_PATH) {
     $env:JUPYTER_CONFIG_PATH = "$configPath;$env:JUPYTER_CONFIG_PATH"
 } else {
     $env:JUPYTER_CONFIG_PATH = $configPath
+}
+
+if ($env:WORKSPACE) {
+    $Workspace = $env:WORKSPACE
 }
 
 if (Test-Path $envFile) {
@@ -48,6 +65,7 @@ if (Test-Path $envFile) {
 
 if (-not (Test-Path (Join-Path $venv "Scripts\python.exe"))) {
     Write-Host "Creating local virtual environment at $venv"
+    New-Item -ItemType Directory -Path (Split-Path $venv) -Force | Out-Null
     & $PythonExe -m venv $venv
 }
 
