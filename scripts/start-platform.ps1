@@ -11,6 +11,8 @@ $venv = Join-Path $root ".venv"
 $envFile = Join-Path $root ".env"
 $configPath = Join-Path $root "jupyter-config"
 
+$env:MODELMIND_JUPYTER_PORT = $Port
+
 if ($env:JUPYTER_CONFIG_PATH) {
     $env:JUPYTER_CONFIG_PATH = "$configPath;$env:JUPYTER_CONFIG_PATH"
 } else {

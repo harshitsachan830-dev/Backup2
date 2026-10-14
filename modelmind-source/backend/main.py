@@ -1,14 +1,18 @@
 import os
-from urllib.parse import urlsplit
+from pathlib import Path
+from urllib.parse import urlencode, urlsplit, urlunsplit
 
 from fastapi import (
     FastAPI,
     File,
     HTTPException,
+    Request,
     UploadFile,
 )
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from jupyter_core.paths import jupyter_data_dir
+from jupyter_server.serverapp import list_running_servers
 from pydantic import BaseModel, Field
 from runtime.packages import (
     installed_packages,
@@ -44,6 +48,13 @@ app = FastAPI(
     title="ModelMind Backend",
     version="0.3.0",
 )
+
+try:
+    jupyter_port = int(os.environ.get("MODELMIND_JUPYTER_PORT", "8899"))
+except ValueError as error:
+    raise ValueError("MODELMIND_JUPYTER_PORT must be a valid TCP port.") from error
+if jupyter_port < 1 or jupyter_port > 65535:
+    raise ValueError("MODELMIND_JUPYTER_PORT must be a valid TCP port.")
 
 configured_origins = os.environ.get("MODELMIND_WEB_ORIGINS") or None
 if configured_origins is not None:
@@ -166,6 +177,75 @@ def health():
         "status": "healthy",
         "runtime": "v2",
     }
+
+
+@app.post("/jupyter/open")
+def open_jupyter(request: Request):
+    if request.headers.get("origin") not in allowed_web_origins:
+        return JSONResponse(
+            status_code=403,
+            content={"detail": "This website is not allowed to open the local notebook."},
+        )
+
+    runtime_directories = dict.fromkeys(
+        directory
+        for directory in (
+            os.environ.get("JUPYTER_RUNTIME_DIR"),
+            str(Path(__file__).resolve().parents[2] / ".jupyter_runtime"),
+            str(Path(jupyter_data_dir()) / "runtime"),
+        )
+        if directory
+    )
+    for runtime_directory in runtime_directories:
+        for server in list_running_servers(runtime_dir=runtime_directory):
+            server_url = server.get("url")
+            if not isinstance(server_url, str):
+                continue
+
+            try:
+                parsed_url = urlsplit(server_url)
+                port = int(server.get("port", parsed_url.port or 0))
+            except (TypeError, ValueError):
+                continue
+            if (
+                parsed_url.scheme != "http"
+                or parsed_url.hostname not in {"127.0.0.1", "localhost"}
+                or port != jupyter_port
+            ):
+                continue
+
+            token = server.get("token")
+            password_enabled = server.get("password") is True
+            if not token and not password_enabled:
+                return HTMLResponse(
+                    status_code=503,
+                    content=(
+                        "<!doctype html><html><head><title>Notebook sign-in required</title>"
+                        "</head><body><h1>Notebook authentication is not configured</h1>"
+                        "<p>Restart JupyterLab with the ModelMind companion so its local "
+                        "login protection is enabled, then try again.</p></body></html>"
+                    ),
+                )
+
+            base_url = server.get("base_url")
+            if not isinstance(base_url, str) or not base_url.startswith("/"):
+                base_url = parsed_url.path or "/"
+            lab_path = f"{base_url.rstrip('/')}/lab/"
+            query = urlencode({"token": token}) if isinstance(token, str) and token else ""
+            launch_url = urlunsplit(
+                ("http", f"127.0.0.1:{port}", lab_path, query, "")
+            )
+            return RedirectResponse(launch_url, status_code=303)
+
+    return HTMLResponse(
+        status_code=503,
+        content=(
+            "<!doctype html><html><head><title>ModelMind Notebook is not running</title>"
+            "</head><body><h1>ModelMind Notebook is not running</h1>"
+            "<p>Start the ModelMind companion on this computer, keep it running, "
+            "and then choose Open Notebook again.</p></body></html>"
+        ),
+    )
 
 
 # ==========================================

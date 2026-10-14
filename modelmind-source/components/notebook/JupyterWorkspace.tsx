@@ -1,15 +1,10 @@
 "use client";
 
-const JUPYTER_URL = (
-  process.env.NEXT_PUBLIC_JUPYTER_URL || "http://127.0.0.1:8899"
-).replace(/\/+$/, "");
+import OpenJupyterForm from "@/components/notebook/OpenJupyterForm";
 
-const notebooks = [
-  { name: "Untitled1.ipynb", description: "56 cells" },
-  { name: "Untitled.ipynb", description: "23 cells" },
-  { name: "Untitled2.ipynb", description: "12 cells" },
-  { name: "Untitled3.ipynb", description: "6 cells" },
-];
+const API_URL = (
+  process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000"
+).replace(/\/+$/, "");
 
 export default function JupyterWorkspace() {
   return (
@@ -22,44 +17,27 @@ export default function JupyterWorkspace() {
           notebook demo. Your ModelMind extension provides Error Assistant,
           AI Chat, preprocessing tools, and ML Studio inside JupyterLab.
         </p>
-        <a href={`${JUPYTER_URL}/lab/`} target="_blank" rel="noreferrer">
+        <OpenJupyterForm className="jupyterLaunchButton">
           Open ModelMind JupyterLab <span aria-hidden="true">↗</span>
-        </a>
+        </OpenJupyterForm>
         <p className="jupyterLocalAddress">
-          Local server: <code>{JUPYTER_URL}</code>
+          Local companion: <code>{API_URL}</code>
         </p>
       </section>
 
       <section className="jupyterNotebooks">
         <div className="portalSectionHeading">
           <span className="portalEyebrow">SAVED ON THIS COMPUTER</span>
-          <h2>Open one of your existing notebooks</h2>
+          <h2>Your notebooks stay on this computer</h2>
           <p>
-            JupyterLab starts with ModelMind and opens an authenticated browser
-            session automatically. Keep that browser session open while using
-            these notebook links.
+            Open JupyterLab to browse and create notebooks in your local
+            workspace. Your files are not uploaded to ModelMind or Render.
           </p>
         </div>
-        <div className="jupyterNotebookList">
-          {notebooks.map(notebook => (
-            <a
-              className="jupyterNotebookRow"
-              href={`${JUPYTER_URL}/lab/tree/${encodeURIComponent(notebook.name)}`}
-              key={notebook.name}
-              target="_blank"
-              rel="noreferrer"
-            >
-              <span className="jupyterNotebookIcon" aria-hidden="true">
-                ▣
-              </span>
-              <span className="jupyterNotebookName">
-                <strong>{notebook.name}</strong>
-                <small>{notebook.description} · Jupyter Notebook</small>
-              </span>
-              <span className="jupyterNotebookOpen">Open ↗</span>
-            </a>
-          ))}
-        </div>
+        <p className="jupyterLocalAddress">
+          If the companion is not running, start it from the project folder
+          with <code>npm run companion</code> and keep its terminal open.
+        </p>
       </section>
     </main>
   );

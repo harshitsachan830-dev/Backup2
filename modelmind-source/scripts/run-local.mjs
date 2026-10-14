@@ -187,12 +187,22 @@ try {
           "-Port",
           String(jupyterPort),
         ],
-        { cwd: repositoryDirectory },
+        {
+          cwd: repositoryDirectory,
+          env: {
+            ...process.env,
+            MODELMIND_JUPYTER_PORT: String(jupyterPort),
+          },
+        },
       );
     } else {
       startChild("bash", [platformScript], {
         cwd: repositoryDirectory,
-        env: { ...process.env, PORT: String(jupyterPort) },
+        env: {
+          ...process.env,
+          MODELMIND_JUPYTER_PORT: String(jupyterPort),
+          PORT: String(jupyterPort),
+        },
       });
     }
     await waitForService("JupyterLab", isJupyterRunning, 10 * 60 * 1000);
@@ -221,6 +231,7 @@ try {
           ...process.env,
           ...(localOrigins ? { MODELMIND_WEB_ORIGINS: localOrigins } : {}),
           MODELMIND_API_PORT: String(apiPort),
+          MODELMIND_JUPYTER_PORT: String(jupyterPort),
         },
       },
     );

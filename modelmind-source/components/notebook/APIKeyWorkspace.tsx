@@ -1,8 +1,6 @@
 "use client";
 
-const JUPYTER_URL = (
-  process.env.NEXT_PUBLIC_JUPYTER_URL || "http://127.0.0.1:8899"
-).replace(/\/+$/, "");
+import OpenJupyterForm from "@/components/notebook/OpenJupyterForm";
 
 export default function APIKeyWorkspace() {
   return (
@@ -15,14 +13,15 @@ export default function APIKeyWorkspace() {
           in the JupyterLab AI Chatbot and Error Assistant. The key is not
           stored in your browser or notebook files.
         </p>
-        <a href={`${JUPYTER_URL}/lab/`} target="_blank" rel="noreferrer">
-          Open JupyterLab to configure your key <span aria-hidden="true">↗</span>
-        </a>
+        <OpenJupyterForm className="jupyterLaunchButton">
+          Open JupyterLab to configure your key{" "}
+          <span aria-hidden="true">↗</span>
+        </OpenJupyterForm>
         <p className="jupyterLocalAddress">
           In JupyterLab, open the <strong>API Key</strong> tab in the right
-          sidebar, paste your key, and choose <strong>Save key</strong>. Start
-          JupyterLab with the ModelMind launcher to open its secure session
-          automatically.
+          sidebar, paste your key, and choose <strong>Save key</strong>. The
+          button opens the local Jupyter session through the companion without
+          disabling Jupyter authentication.
         </p>
       </section>
 

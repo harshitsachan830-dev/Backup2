@@ -141,6 +141,13 @@ local notebooks only while the companion is running in the user's browser
 environment. Test browser localhost/network permission prompts on every
 supported browser before launch.
 
+The website's **Open Notebook** action asks the local companion to open the
+matching local JupyterLab session. The companion redirects to Jupyter using
+its local authentication token; it does not disable token authentication or
+send the token to the hosted website. Start the companion with
+`npm run companion` from `modelmind-source` and keep it running while using
+the notebook.
+
 Installing the Ollama application and installing its model are separate
 steps. When Ollama is missing, the Error Assistant opens Ollama's official
 download page. After installing and starting Ollama, the user can explicitly

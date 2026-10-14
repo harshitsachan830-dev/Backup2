@@ -341,6 +341,7 @@ button {
 }
 
 .portalHero > a,
+.portalHero > form > button,
 .dashboardCard > a,
 .dashboardCard > button,
 .internalLabLink > button {
@@ -360,6 +361,7 @@ button {
 }
 
 .portalHero > a:hover,
+.portalHero > form > button:hover,
 .dashboardCard > a:hover,
 .dashboardCard > button:hover,
 .internalLabLink > button:hover {
@@ -569,6 +571,18 @@ button {
 }
 
 .jupyterWorkspace .portalHero > a {
+  cursor: pointer;
+}
+
+.jupyterWorkspace .portalHero > form {
+  display: inline-block;
+}
+
+.jupyterWorkspace .portalHero > form > button {
+  cursor: pointer;
+}
+
+.jupyterLaunchButton {
   cursor: pointer;
 }
 

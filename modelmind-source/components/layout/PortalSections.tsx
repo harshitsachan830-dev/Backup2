@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 
+import OpenJupyterForm from "@/components/notebook/OpenJupyterForm";
 import ProjectsWorkspace from "@/components/projects/ProjectsWorkspace";
 import { visualizations } from "@/lib/visualizations";
 import type { Workspace } from "./Sidebar";
@@ -284,9 +285,6 @@ export default function PortalSections({
   }
 
   if (section === "Notebook") {
-    const notebookUrl = (
-      process.env.NEXT_PUBLIC_JUPYTER_URL || "http://127.0.0.1:8899"
-    ).replace(/\/+$/, "");
     return (
       <main className="referencePage">
         <section className="referencePanel referenceNotebook">
@@ -295,7 +293,11 @@ export default function PortalSections({
             icon={<span className="referenceCodeIcon">&lt;/&gt;</span>}
             title="Notebook"
             description="Write, run and experiment with Python right in your browser."
-            action={<ExternalLink className="referencePrimaryLink" href={`${notebookUrl}/lab/`}>Open Notebook <ArrowIcon /></ExternalLink>}
+            action={
+              <OpenJupyterForm className="referencePrimaryLink">
+                Open Notebook <ArrowIcon />
+              </OpenJupyterForm>
+            }
           />
           <div className="referenceNotebookGrid">
             <NotebookPreview />
