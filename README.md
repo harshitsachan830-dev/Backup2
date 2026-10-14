@@ -14,10 +14,39 @@ See [context.md](context.md) for the report-derived phase checklist, implementat
 
 ## Requirements
 
-- Python with `venv` and `pip`. The developer machine currently has Python 3.14.2; the project's minimum supported Python version has not yet been certified.
-- Node.js and npm are needed to develop/build the frontend extension. The developer Mac has Node.js 24.11.1 and npm 11.6.2.
+- Python 3 with `venv` and `pip`; the extension declares Python 3.10 or newer. The developer machine currently has Python 3.14.2; the full Python/OS support range has not yet been certified.
+- Node.js 20.9 or newer and npm are required for the local companion. The developer Mac has Node.js 24.11.1 and npm 11.6.2.
 - macOS or Windows for the first local companion target. Linux packaging is a later, explicitly tested target.
-- Ollama is required for the optional local explanation path. The manifest records a recommended model, and explicit user approval is required before the app triggers a local `ollama pull`.
+- Ollama is optional for local AI explanations. The manifest records a recommended model, and explicit user approval is required before the app triggers a local `ollama pull`.
+
+## Private beta setup for Windows and macOS
+
+Beta downloads are published in the private [Backup2 releases](https://github.com/harshitsachan830-dev/Backup2/releases).
+You must be signed in to an invited GitHub account to download them. Repository
+access also grants access to its source code, so invite only trusted beta
+testers. Download the ZIP for your operating system, extract the complete
+folder, and run its platform start script:
+
+- **Windows:** double-click `scripts\start-beta-windows.cmd`.
+- **macOS:** double-click `scripts/start-beta-macos.command`. If macOS blocks
+  the unsigned script, Control-click it, choose **Open**, and confirm.
+
+The first start checks for Node.js 20.9 or newer and Python 3, installs the
+website's locked Node dependencies and the local Python/Jupyter dependencies,
+then opens the hosted ModelMind staging dashboard. Installation can take several
+minutes and requires an internet connection. Keep the terminal window open
+while using ModelMind; press Ctrl+C there to stop the local notebook services.
+If a prerequisite is missing, install Node.js from
+[nodejs.org](https://nodejs.org/en/download) or Python from
+[python.org](https://www.python.org/downloads/), then run the script again.
+
+This is an unsigned source-based beta setup, not a native `.exe` or `.dmg`
+installer. It is intended for invited beta users; Windows and macOS startup
+must still be verified on representative end-user computers before a general
+release. Ollama is optional and must be installed separately. The recommended
+model is never downloaded without user approval. Gemini use requires the user
+to save their own key in the notebook's API Key panel and explicitly enable
+cloud use when prompted.
 
 ## Start the platform locally
 

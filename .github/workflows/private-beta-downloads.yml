@@ -1,0 +1,108 @@
+name: Build private beta downloads
+
+on:
+  push:
+    tags:
+      - "beta-v*"
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    name: Package ${{ matrix.platform }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macOS
+            runner: macos-latest
+            asset: ModelMind-beta-macOS.zip
+          - platform: Windows
+            runner: windows-latest
+            asset: ModelMind-beta-Windows.zip
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            modelmind-source/backend/requirements.txt
+            extensions/error-assistant/pyproject.toml
+      - name: Validate platform startup script
+        shell: pwsh
+        run: |
+          if ("${{ matrix.platform }}" -eq "Windows") {
+            $tokens = $null
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile(
+              (Join-Path $PWD "scripts/start-beta-windows.ps1"),
+              [ref]$tokens,
+              [ref]$errors
+            ) | Out-Null
+            if ($errors.Count -gt 0) {
+              throw ($errors | Out-String)
+            }
+          } else {
+            bash -n scripts/start-beta-macos.command
+            if ($LASTEXITCODE -ne 0) {
+              throw "The macOS startup script has a syntax error."
+            }
+          }
+      - name: Install locked dashboard dependencies
+        run: npm ci
+        working-directory: modelmind-source
+      - name: Install Python runtime dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install -r requirements.txt
+          python -m pip install -r modelmind-source/backend/requirements.txt
+          python -m pip install -e extensions/error-assistant
+      - name: Test local companion origin and handoff
+        run: python -m pytest -q tests/test_local_origin.py
+        working-directory: modelmind-source/backend
+        env:
+          PYTHONPATH: .
+      - name: Test notebook extension
+        run: python -m pytest -q extensions/error-assistant
+      - name: Create source-based setup package
+        shell: pwsh
+        run: |
+          $output = Join-Path $env:RUNNER_TEMP "${{ matrix.asset }}"
+          git archive --format=zip --output="$output" HEAD
+          if ($LASTEXITCODE -ne 0) {
+            throw "Could not create the ${{ matrix.platform }} beta package."
+          }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset }}
+          path: ${{ runner.temp }}/${{ matrix.asset }}
+          if-no-files-found: error
+          retention-days: 7
+
+  release:
+    name: Publish private beta assets
+    needs: package
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          pattern: ModelMind-beta-*
+          merge-multiple: true
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" release-assets/*.zip \
+            --title "ModelMind private beta $GITHUB_REF_NAME" \
+            --notes "Source-based setup packages for invited macOS and Windows beta testers. See README.md for prerequisites and setup instructions."

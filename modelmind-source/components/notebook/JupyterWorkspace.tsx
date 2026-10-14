@@ -20,6 +20,13 @@ export default function JupyterWorkspace() {
         <OpenJupyterForm className="jupyterLaunchButton">
           Open ModelMind JupyterLab <span aria-hidden="true">↗</span>
         </OpenJupyterForm>
+        <a
+          href="https://github.com/harshitsachan830-dev/Backup2/releases"
+          rel="noreferrer"
+          target="_blank"
+        >
+          Download the Windows/macOS companion
+        </a>
         <p className="jupyterLocalAddress">
           Local companion: <code>{API_URL}</code>
         </p>
@@ -35,8 +42,8 @@ export default function JupyterWorkspace() {
           </p>
         </div>
         <p className="jupyterLocalAddress">
-          If the companion is not running, start it from the project folder
-          with <code>npm run companion</code> and keep its terminal open.
+          If the companion is not running, start it with the Windows or macOS
+          script from the extracted beta package and keep its terminal open.
         </p>
       </section>
     </main>
