@@ -263,6 +263,20 @@ export function authRequestIsSameOrigin(request: Request) {
     return false;
   }
 
+  const publicOrigin = process.env.MODELMIND_PUBLIC_ORIGIN;
+  if (publicOrigin) {
+    try {
+      const configuredOrigin = new URL(publicOrigin);
+      return (
+        configuredOrigin.protocol === "https:" &&
+        configuredOrigin.origin === publicOrigin &&
+        origin === configuredOrigin.origin
+      );
+    } catch {
+      return false;
+    }
+  }
+
   const requestUrl = new URL(request.url);
   if (origin === requestUrl.origin) {
     return true;

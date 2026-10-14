@@ -41,7 +41,11 @@ only by server code and must never be exposed to the browser.
 6. Copy `.env.local.example` to `.env.local`, fill the values locally, and
    add the same secrets to your hosting provider's server environment before
    deploying. Never commit `.env.local`.
-7. Test signup end-to-end. Check the inbox and spam folder, enter the code
+7. Set `MODELMIND_PUBLIC_ORIGIN` in the hosting provider's server environment
+   to the exact public HTTPS origin, with no path or trailing slash (for
+   example, `https://your-app.onrender.com`). This is required when the app
+   runs behind a reverse proxy.
+8. Test signup end-to-end. Check the inbox and spam folder, enter the code
    before it expires, create a password, then verify that the user appears in
    MongoDB and Supabase **Authentication → Users**. Email delivery has not
    been tested until this real test succeeds.
