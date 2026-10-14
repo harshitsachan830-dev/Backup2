@@ -104,5 +104,6 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create "$GITHUB_REF_NAME" release-assets/*.zip \
+            --repo "$GITHUB_REPOSITORY" \
             --title "ModelMind private beta $GITHUB_REF_NAME" \
             --notes "Source-based setup packages for invited macOS and Windows beta testers. See README.md for prerequisites and setup instructions."
