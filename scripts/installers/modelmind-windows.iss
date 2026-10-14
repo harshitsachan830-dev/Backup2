@@ -1,9 +1,10 @@
 #define PackageRoot GetEnv("MODELMIND_PACKAGE_ROOT")
+#define PackageVersion GetEnv("MODELMIND_APP_VERSION")
 
 [Setup]
 AppId={{e26702c7-366f-4e65-bc53-4d48496aa57f}
 AppName=ModelMind
-AppVersion=0.1.1
+AppVersion={#PackageVersion}
 AppPublisher=ModelMind
 DefaultDirName={localappdata}\Programs\ModelMind
 DefaultGroupName=ModelMind

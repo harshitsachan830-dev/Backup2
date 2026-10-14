@@ -8,6 +8,7 @@ APP_CONTENTS="$APP_BUNDLE/Contents"
 APP_RESOURCES="$APP_CONTENTS/Resources/app"
 PYTHON_VERSION="3.12.15"
 PYTHON_BUILD_DATE="20261013"
+APP_VERSION="${MODELMIND_APP_VERSION:-0.1.1}"
 
 rm -rf "$PACKAGE_ROOT"
 mkdir -p "$APP_CONTENTS/MacOS" "$APP_RESOURCES/runtime/node/bin" \
@@ -47,7 +48,7 @@ tar -xzf "$python_archive_path" -C "$APP_RESOURCES/runtime/python" \
   --strip-components=1
 rm "$python_archive_path"
 
-cat > "$APP_CONTENTS/Info.plist" <<'PLIST'
+cat > "$APP_CONTENTS/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -61,7 +62,7 @@ cat > "$APP_CONTENTS/Info.plist" <<'PLIST'
   <key>CFBundlePackageType</key>
   <string>APPL</string>
   <key>CFBundleVersion</key>
-  <string>0.1.1</string>
+  <string>${APP_VERSION}</string>
 </dict>
 </plist>
 PLIST
@@ -96,6 +97,6 @@ asset_suffix="${MODELMIND_PACKAGE_SUFFIX:-macOS}"
 pkgbuild \
   --root "$PACKAGE_ROOT" \
   --identifier com.modelmind.companion \
-  --version 0.1.1 \
+  --version "$APP_VERSION" \
   --install-location /Applications \
   "${RUNNER_TEMP:-$ROOT_DIR}/ModelMind-Setup-${asset_suffix}.pkg"
