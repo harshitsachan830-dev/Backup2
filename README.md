@@ -54,7 +54,9 @@ The `private-companion-v*` workflow builds unsigned Windows x64 and macOS
 Intel/Apple Silicon `.exe`/`.pkg` installers for staging tests. These packages
 include Node.js and Python runtimes, keep notebooks and the virtual environment
 in the user's writable folders, and download Jupyter/Python packages the first
-time they are opened.
+time they are opened. macOS packages use a checksum-pinned, relocatable CPython
+build and verify that it can create and run a virtual environment from the
+staged app bundle.
 They still include application files and are published only as private
 prereleases; do not share them publicly. They point to the staging website and
 are not a production release. Public distribution requires a production

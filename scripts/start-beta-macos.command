@@ -5,7 +5,7 @@ ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 APP_DIR="$ROOT_DIR/modelmind-source"
 WEB_ORIGIN="https://modelmind-staging.onrender.com"
 PACKAGED_NODE="$ROOT_DIR/runtime/node/bin/node"
-PACKAGED_PYTHON="$ROOT_DIR/runtime/python/bin/python3"
+PACKAGED_PYTHON="$ROOT_DIR/runtime/python/bin/python3.12"
 USER_DATA_DIR="$HOME/Library/Application Support/ModelMind"
 WORKSPACE_DIR="$HOME/ModelMind Notebooks"
 
@@ -27,19 +27,17 @@ if ! "$NODE_BIN" -e 'const [major, minor] = process.versions.node.split(".").map
   fail "Node.js 20.9 or newer is required. Update Node.js and run this script again."
 fi
 
-if [[ -x "$PACKAGED_PYTHON" ]]; then
+PYTHON_BIN=""
+if [[ -x "$PACKAGED_PYTHON" ]] &&
+  "$PACKAGED_PYTHON" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)' >/dev/null 2>&1; then
   PYTHON_BIN="$PACKAGED_PYTHON"
-elif [[ -x "$ROOT_DIR/runtime/python/bin/python3.12" ]]; then
-  PYTHON_BIN="$ROOT_DIR/runtime/python/bin/python3.12"
-elif command -v python3 >/dev/null 2>&1; then
+elif command -v python3 >/dev/null 2>&1 &&
+  python3 -c 'import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)' >/dev/null 2>&1; then
   PYTHON_BIN="$(command -v python3)"
 else
-  fail "The bundled Python runtime is missing. Reinstall ModelMind or install Python 3.10 or newer."
+  fail "Could not start the bundled Python runtime, and no working Python 3.10+ is installed. Reinstall ModelMind or install Python 3."
 fi
-
-if ! "$PYTHON_BIN" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)'; then
-  fail "Python 3.10 or newer is required. Update the bundled runtime or install a supported Python version."
-fi
+export MODELMIND_PYTHON_EXECUTABLE="$PYTHON_BIN"
 
 if [[ ! -f "$APP_DIR/scripts/run-local.mjs" ]]; then
   fail "The ModelMind companion files are incomplete. Reinstall ModelMind and try again."

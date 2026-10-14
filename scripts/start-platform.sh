@@ -30,10 +30,12 @@ fi
 if [[ ! -x "$VENV_DIR/bin/python" ]]; then
   echo "Creating local virtual environment at $VENV_DIR"
   mkdir -p "$(dirname "$VENV_DIR")"
-  if [[ -x "$ROOT_DIR/runtime/python/bin/python3" ]]; then
-    "$ROOT_DIR/runtime/python/bin/python3" -m venv "$VENV_DIR"
+  if [[ -n "${MODELMIND_PYTHON_EXECUTABLE:-}" ]]; then
+    "$MODELMIND_PYTHON_EXECUTABLE" -m venv "$VENV_DIR"
   elif [[ -x "$ROOT_DIR/runtime/python/bin/python3.12" ]]; then
     "$ROOT_DIR/runtime/python/bin/python3.12" -m venv "$VENV_DIR"
+  elif [[ -x "$ROOT_DIR/runtime/python/bin/python3" ]]; then
+    "$ROOT_DIR/runtime/python/bin/python3" -m venv "$VENV_DIR"
   else
     python3 -m venv "$VENV_DIR"
   fi

@@ -3,7 +3,7 @@
 [Setup]
 AppId={{e26702c7-366f-4e65-bc53-4d48496aa57f}
 AppName=ModelMind
-AppVersion=0.1.0
+AppVersion=0.1.1
 AppPublisher=ModelMind
 DefaultDirName={localappdata}\Programs\ModelMind
 DefaultGroupName=ModelMind

@@ -6,6 +6,8 @@ PACKAGE_ROOT="${RUNNER_TEMP:-$ROOT_DIR/.package-temp}/modelmind-macos"
 APP_BUNDLE="$PACKAGE_ROOT/ModelMind.app"
 APP_CONTENTS="$APP_BUNDLE/Contents"
 APP_RESOURCES="$APP_CONTENTS/Resources/app"
+PYTHON_VERSION="3.12.15"
+PYTHON_BUILD_DATE="20261013"
 
 rm -rf "$PACKAGE_ROOT"
 mkdir -p "$APP_CONTENTS/MacOS" "$APP_RESOURCES/runtime/node/bin" \
@@ -17,10 +19,33 @@ if [[ ! -f "$APP_RESOURCES/modelmind-source/scripts/run-local.mjs" ]]; then
 fi
 
 node_binary="$(node -p 'process.execPath')"
-python_prefix="$(python -c 'import sys; print(sys.prefix)')"
 cp "$node_binary" "$APP_RESOURCES/runtime/node/bin/node"
 chmod +x "$APP_RESOURCES/runtime/node/bin/node"
-cp -R "$python_prefix"/. "$APP_RESOURCES/runtime/python/"
+
+case "$(uname -m)" in
+  arm64)
+    python_arch="aarch64"
+    python_sha256="ba32036ad8f4c434d97a1ee7feef8b7edc0fac16777639b97e39c74a108e4440"
+    ;;
+  x86_64)
+    python_arch="x86_64"
+    python_sha256="9686ddd8639b855905447ea4a16eb54a804a9ef12afbe7c9ecb1412d9c1fbc98"
+    ;;
+  *)
+    printf 'Unsupported macOS architecture: %s\n' "$(uname -m)" >&2
+    exit 1
+    ;;
+esac
+
+python_archive="cpython-${PYTHON_VERSION}+${PYTHON_BUILD_DATE}-${python_arch}-apple-darwin-install_only.tar.gz"
+python_archive_path="$PACKAGE_ROOT/$python_archive"
+python_archive_url="https://github.com/astral-sh/python-build-standalone/releases/download/${PYTHON_BUILD_DATE}/$(printf '%s' "$python_archive" | sed 's/+/%2B/g')"
+curl --fail --location --silent --show-error "$python_archive_url" \
+  --output "$python_archive_path"
+printf '%s  %s\n' "$python_sha256" "$python_archive_path" | shasum -a 256 -c -
+tar -xzf "$python_archive_path" -C "$APP_RESOURCES/runtime/python" \
+  --strip-components=1
+rm "$python_archive_path"
 
 cat > "$APP_CONTENTS/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
@@ -36,7 +61,7 @@ cat > "$APP_CONTENTS/Info.plist" <<'PLIST'
   <key>CFBundlePackageType</key>
   <string>APPL</string>
   <key>CFBundleVersion</key>
-  <string>0.1.0</string>
+  <string>0.1.1</string>
 </dict>
 </plist>
 PLIST
@@ -50,10 +75,7 @@ LAUNCHER
 chmod +x "$APP_CONTENTS/MacOS/ModelMind"
 chmod +x "$APP_RESOURCES/scripts/start-beta-macos.command"
 
-runtime_python="$APP_RESOURCES/runtime/python/bin/python3"
-if [[ ! -x "$runtime_python" ]]; then
-  runtime_python="$APP_RESOURCES/runtime/python/bin/python3.12"
-fi
+runtime_python="$APP_RESOURCES/runtime/python/bin/python3.12"
 if [[ ! -x "$runtime_python" ]]; then
   printf 'Bundled Python runtime is missing or not executable.\n' >&2
   exit 1
@@ -74,6 +96,6 @@ asset_suffix="${MODELMIND_PACKAGE_SUFFIX:-macOS}"
 pkgbuild \
   --root "$PACKAGE_ROOT" \
   --identifier com.modelmind.companion \
-  --version 0.1.0 \
+  --version 0.1.1 \
   --install-location /Applications \
   "${RUNNER_TEMP:-$ROOT_DIR}/ModelMind-Setup-${asset_suffix}.pkg"
