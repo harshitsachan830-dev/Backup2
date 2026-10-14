@@ -465,6 +465,10 @@ async def test_ensure_model_ready_uses_manual_pull_when_allowed(monkeypatch):
 
     monkeypatch.setattr("ml_platform_error_assistant.ollama.check_ollama_status", fake_check)
     monkeypatch.setattr("ml_platform_error_assistant.ollama.subprocess.run", fake_run)
+    monkeypatch.setattr(
+        "ml_platform_error_assistant.ollama.shutil.which",
+        lambda command: "ollama" if command == "ollama" else None,
+    )
 
     result = await ensure_model_ready(allow_download=True)
 
