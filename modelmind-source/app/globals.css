@@ -341,7 +341,7 @@ button {
 }
 
 .portalHero > a,
-.portalHero > form > button,
+.portalHero > button,
 .dashboardCard > a,
 .dashboardCard > button,
 .internalLabLink > button {
@@ -361,7 +361,7 @@ button {
 }
 
 .portalHero > a:hover,
-.portalHero > form > button:hover,
+.portalHero > button:hover,
 .dashboardCard > a:hover,
 .dashboardCard > button:hover,
 .internalLabLink > button:hover {
@@ -574,16 +574,16 @@ button {
   cursor: pointer;
 }
 
-.jupyterWorkspace .portalHero > form {
-  display: inline-block;
-}
-
-.jupyterWorkspace .portalHero > form > button {
+.jupyterWorkspace .portalHero > button {
   cursor: pointer;
 }
 
 .jupyterLaunchButton {
   cursor: pointer;
+}
+
+.jupyterLaunchError {
+  color: #dc4b64 !important;
 }
 
 .jupyterLocalAddress {

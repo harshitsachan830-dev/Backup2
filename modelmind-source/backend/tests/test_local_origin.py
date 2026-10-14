@@ -31,7 +31,9 @@ def test_local_runtime_rejects_unconfigured_website_origins():
     assert response.status_code == 403
 
 
-def test_jupyter_open_redirects_to_authenticated_local_lab(monkeypatch):
+def test_jupyter_open_uses_a_one_time_launch_id_and_redirects_to_authenticated_lab(
+    monkeypatch,
+):
     def running_server(**kwargs):
         assert kwargs["runtime_dir"]
         return iter(
@@ -46,27 +48,54 @@ def test_jupyter_open_redirects_to_authenticated_local_lab(monkeypatch):
             ]
         )
 
-    monkeypatch.setattr(
-        "main.list_running_servers",
-        running_server,
-    )
-
-    response = client.post(
-        "/jupyter/open",
+    monkeypatch.setattr("main.list_running_servers", running_server)
+    prepared = client.post(
+        "/jupyter/prepare",
         headers={"Origin": "http://localhost:3000"},
+    )
+    assert prepared.status_code == 200
+
+    response = client.get(
+        f"/jupyter/open?launch_id={prepared.json()['launch_id']}",
+        headers={"Origin": "null"},
         follow_redirects=False,
     )
-
     assert response.status_code == 303
-    assert response.headers["location"] == (
-        "http://127.0.0.1:8899/lab/?token=local-test-token"
+    assert response.headers["location"] == "http://127.0.0.1:8899/lab/?token=local-test-token"
+
+    replay = client.get(
+        f"/jupyter/open?launch_id={prepared.json()['launch_id']}",
+        headers={"Origin": "null"},
+        follow_redirects=False,
     )
+    assert replay.status_code == 403
 
 
-def test_jupyter_open_requires_an_allowed_origin():
-    response = client.post("/jupyter/open")
-
+def test_jupyter_prepare_rejects_untrusted_origins():
+    response = client.post(
+        "/jupyter/prepare",
+        headers={"Origin": "https://untrusted.example"},
+    )
     assert response.status_code == 403
+
+
+def test_jupyter_open_rejects_missing_or_replayed_launch_id():
+    invalid_id = "x" * 43
+    response = client.get(
+        f"/jupyter/open?launch_id={invalid_id}",
+        headers={"Origin": "null"},
+        follow_redirects=False,
+    )
+    assert response.status_code == 403
+    assert "expired" in response.text.lower()
+
+    no_id_response = client.get(
+        "/jupyter/open",
+        headers={"Origin": "null"},
+        follow_redirects=False,
+    )
+    assert no_id_response.status_code == 403
+    assert "open notebook from modelmind" in no_id_response.text.lower()
 
 
 def test_jupyter_open_does_not_redirect_to_an_unauthenticated_server(monkeypatch):
@@ -84,17 +113,16 @@ def test_jupyter_open_does_not_redirect_to_an_unauthenticated_server(monkeypatch
             ]
         )
 
-    monkeypatch.setattr(
-        "main.list_running_servers",
-        running_server,
-    )
-
-    response = client.post(
-        "/jupyter/open",
+    monkeypatch.setattr("main.list_running_servers", running_server)
+    launch_id = client.post(
+        "/jupyter/prepare",
         headers={"Origin": "http://localhost:3000"},
+    ).json()["launch_id"]
+    response = client.get(
+        f"/jupyter/open?launch_id={launch_id}",
+        headers={"Origin": "null"},
         follow_redirects=False,
     )
-
     assert response.status_code == 503
     assert "authentication is not configured" in response.text.lower()
 

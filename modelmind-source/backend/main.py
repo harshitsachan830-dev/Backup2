@@ -1,4 +1,6 @@
 import os
+import secrets
+import time
 from pathlib import Path
 from urllib.parse import urlencode, urlsplit, urlunsplit
 
@@ -6,6 +8,7 @@ from fastapi import (
     FastAPI,
     File,
     HTTPException,
+    Query,
     Request,
     UploadFile,
 )
@@ -48,6 +51,7 @@ app = FastAPI(
     title="ModelMind Backend",
     version="0.3.0",
 )
+pending_jupyter_launches: dict[str, float] = {}
 
 try:
     jupyter_port = int(os.environ.get("MODELMIND_JUPYTER_PORT", "8899"))
@@ -99,7 +103,14 @@ app.add_middleware(
 @app.middleware("http")
 async def enforce_local_web_origin(request, call_next):
     origin = request.headers.get("origin")
-    if origin is not None and origin not in allowed_web_origins:
+    is_capability_navigation = (
+        request.method == "GET" and request.url.path == "/jupyter/open"
+    )
+    if (
+        not is_capability_navigation
+        and origin is not None
+        and origin not in allowed_web_origins
+    ):
         return JSONResponse(
             status_code=403,
             content={"detail": "This website is not allowed to use the local ModelMind runtime."},
@@ -179,12 +190,47 @@ def health():
     }
 
 
-@app.post("/jupyter/open")
-def open_jupyter(request: Request):
+@app.post("/jupyter/prepare")
+def prepare_jupyter(request: Request):
     if request.headers.get("origin") not in allowed_web_origins:
         return JSONResponse(
             status_code=403,
             content={"detail": "This website is not allowed to open the local notebook."},
+        )
+
+    now = time.monotonic()
+    for launch_id, expires_at in list(pending_jupyter_launches.items()):
+        if expires_at <= now:
+            del pending_jupyter_launches[launch_id]
+
+    launch_id = secrets.token_urlsafe(32)
+    pending_jupyter_launches[launch_id] = now + 60
+    return {"launch_id": launch_id}
+
+
+@app.get("/jupyter/open")
+def open_jupyter(
+    launch_id: str | None = Query(default=None, min_length=32, max_length=128),
+):
+    if launch_id is None:
+        return HTMLResponse(
+            status_code=403,
+            content=(
+                "<!doctype html><html><head><title>Notebook link required</title>"
+                "</head><body><h1>Open Notebook from ModelMind</h1>"
+                "<p>Return to ModelMind and choose Open Notebook to create a secure link.</p>"
+                "</body></html>"
+            ),
+        )
+    expires_at = pending_jupyter_launches.pop(launch_id, None)
+    if expires_at is None or expires_at <= time.monotonic():
+        return HTMLResponse(
+            status_code=403,
+            content=(
+                "<!doctype html><html><head><title>Notebook link expired</title>"
+                "</head><body><h1>This notebook link has expired</h1>"
+                "<p>Return to ModelMind and choose Open Notebook again.</p></body></html>"
+            ),
         )
 
     runtime_directories = dict.fromkeys(

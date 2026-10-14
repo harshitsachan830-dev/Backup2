@@ -171,10 +171,12 @@ not use a wildcard or expose either local port publicly.
 Notebook code runs as the local user's account, so this local runtime is not a
 sandbox for untrusted code.
 
-The dashboard's **Open Notebook** button submits a same-origin-checked request
-to the local companion. The companion finds the local Jupyter server metadata
-and redirects the browser to its token-authenticated Lab URL; the token is not
-sent to the hosted website. Keep Jupyter token/password authentication enabled.
+The dashboard's **Open Notebook** button requests a short-lived, one-time launch
+ID from the local companion using the configured website origin. The browser
+uses that ID to open the local companion, which finds the local Jupyter server
+metadata and redirects to its token-authenticated Lab URL. The Jupyter token is
+not sent to the hosted website; keep Jupyter token/password authentication
+enabled. If the new tab does not open, allow pop-ups for the site and try again.
 The companion and Jupyter use the same operating-system Jupyter runtime
 directory (or the same inherited `JUPYTER_RUNTIME_DIR` override). If the
 companion is stopped, the Notebook page explains how to start it.
