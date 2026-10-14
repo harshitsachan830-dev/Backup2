@@ -8,6 +8,7 @@ PACKAGED_NODE="$ROOT_DIR/runtime/node/bin/node"
 PACKAGED_PYTHON="$ROOT_DIR/runtime/python/bin/python3.12"
 USER_DATA_DIR="$HOME/Library/Application Support/ModelMind"
 WORKSPACE_DIR="$HOME/ModelMind Notebooks"
+JUPYTER_RUNTIME_DIR="$USER_DATA_DIR/jupyter/runtime"
 
 fail() {
   printf '\nModelMind setup could not continue: %s\n' "$1" >&2
@@ -43,9 +44,10 @@ if [[ ! -f "$APP_DIR/scripts/run-local.mjs" ]]; then
   fail "The ModelMind companion files are incomplete. Reinstall ModelMind and try again."
 fi
 
-mkdir -p "$USER_DATA_DIR" "$WORKSPACE_DIR"
+mkdir -p "$USER_DATA_DIR" "$WORKSPACE_DIR" "$JUPYTER_RUNTIME_DIR"
 export MODELMIND_USER_DATA_DIR="$USER_DATA_DIR"
 export MODELMIND_VENV_DIR="$USER_DATA_DIR/.venv"
+export JUPYTER_RUNTIME_DIR
 export WORKSPACE="$WORKSPACE_DIR"
 
 if ! open "$WEB_ORIGIN"; then

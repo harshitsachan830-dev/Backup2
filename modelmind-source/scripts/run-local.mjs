@@ -2,6 +2,10 @@ import { access, readFile } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  findAvailablePort,
+  findManagedJupyterPort,
+} from "./jupyter-runtime.mjs";
 
 const appDirectory = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const repositoryDirectory = resolve(appDirectory, "..");
@@ -20,7 +24,11 @@ const jupyterAddress = new URL(jupyterUrl);
 const isLocalJupyter = ["127.0.0.1", "localhost"].includes(
   jupyterAddress.hostname,
 );
-const jupyterPort = Number(jupyterAddress.port || "8899");
+const requestedJupyterPort = Number(jupyterAddress.port || "8899");
+const mode = process.argv[2] ?? "dev";
+const runWebsite = mode !== "companion";
+let jupyterPort = requestedJupyterPort;
+const jupyterRuntimeDirectory = process.env.JUPYTER_RUNTIME_DIR;
 const platformScript =
   process.platform === "win32"
     ? resolve(repositoryDirectory, "scripts", "start-platform.ps1")
@@ -29,9 +37,6 @@ const pythonExecutable =
   process.platform === "win32"
     ? resolve(virtualEnvironmentDirectory, "Scripts", "python.exe")
     : resolve(virtualEnvironmentDirectory, "bin", "python");
-const mode = process.argv[2] ?? "dev";
-const runWebsite = mode !== "companion";
-
 async function ensurePythonEnvironment() {
   try {
     await access(pythonExecutable);
@@ -93,12 +98,15 @@ function runCommand(command, args, options) {
 }
 
 async function isJupyterRunning() {
+  return isJupyterPortRunning(jupyterPort);
+}
+
+async function isJupyterPortRunning(port) {
   try {
-    const response = await fetch(`http://127.0.0.1:${jupyterPort}/api`, {
+    const response = await fetch(`http://127.0.0.1:${port}/api`, {
       redirect: "manual",
       signal: AbortSignal.timeout(1500),
     });
-
     if (response.status === 302) {
       return response.headers.get("location")?.startsWith("/login") ?? false;
     }
@@ -131,7 +139,15 @@ async function isBackendRunning() {
     }
 
     const body = await response.json();
-    return body?.status === "healthy";
+    if (body?.status !== "healthy") {
+      return false;
+    }
+    if (body.jupyter_port !== jupyterPort) {
+      throw new Error(
+        "A different or older ModelMind companion is already using the local API. Stop its Terminal window, then restart ModelMind.",
+      );
+    }
+    return true;
   } catch (error) {
     if (
       error instanceof TypeError &&
@@ -234,41 +250,57 @@ try {
     console.log(
       `Using the configured Jupyter server at ${jupyterUrl}; local startup skipped.`,
     );
-  } else if (await isJupyterRunning()) {
-    console.log(`Using the existing Jupyter server at ${jupyterUrl}.`);
   } else {
-    console.log(`Starting JupyterLab at ${jupyterUrl}.`);
-    if (process.platform === "win32") {
-      startChild(
-        "powershell.exe",
-        [
-          "-NoProfile",
-          "-ExecutionPolicy",
-          "Bypass",
-          "-File",
-          platformScript,
-          "-Port",
-          String(jupyterPort),
-        ],
-        {
+    const managedPort = jupyterRuntimeDirectory
+      ? await findManagedJupyterPort(
+          jupyterRuntimeDirectory,
+          isJupyterPortRunning,
+        )
+      : null;
+    if (managedPort !== null) {
+      jupyterPort = managedPort;
+      console.log(`Using the ModelMind Jupyter server at http://127.0.0.1:${jupyterPort}.`);
+    } else {
+      jupyterPort = await findAvailablePort(
+        requestedJupyterPort,
+        Math.min(requestedJupyterPort + 100, 65535),
+      );
+      const managedJupyterUrl = `http://127.0.0.1:${jupyterPort}`;
+      console.log(`Starting ModelMind JupyterLab at ${managedJupyterUrl}.`);
+      if (process.platform === "win32") {
+        startChild(
+          "powershell.exe",
+          [
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            platformScript,
+            "-Port",
+            String(jupyterPort),
+          ],
+          {
+            cwd: repositoryDirectory,
+            env: {
+              ...process.env,
+              JUPYTER_RUNTIME_DIR: jupyterRuntimeDirectory,
+              MODELMIND_JUPYTER_PORT: String(jupyterPort),
+            },
+          },
+        );
+      } else {
+        startChild("bash", [platformScript], {
           cwd: repositoryDirectory,
           env: {
             ...process.env,
+            JUPYTER_RUNTIME_DIR: jupyterRuntimeDirectory,
             MODELMIND_JUPYTER_PORT: String(jupyterPort),
+            PORT: String(jupyterPort),
           },
-        },
-      );
-    } else {
-      startChild("bash", [platformScript], {
-        cwd: repositoryDirectory,
-        env: {
-          ...process.env,
-          MODELMIND_JUPYTER_PORT: String(jupyterPort),
-          PORT: String(jupyterPort),
-        },
-      });
+        });
+      }
+      await waitForService("JupyterLab", isJupyterRunning, 10 * 60 * 1000);
     }
-    await waitForService("JupyterLab", isJupyterRunning, 10 * 60 * 1000);
   }
 
   if (await isBackendRunning()) {

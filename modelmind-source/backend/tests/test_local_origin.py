@@ -6,6 +6,13 @@ from main import app
 client = TestClient(app)
 
 
+def test_health_reports_the_configured_jupyter_port():
+    response = client.get("/health")
+
+    assert response.status_code == 200
+    assert response.json()["jupyter_port"] == 8899
+
+
 def test_local_runtime_accepts_the_configured_dashboard_origin():
     response = client.post(
         "/runtime",

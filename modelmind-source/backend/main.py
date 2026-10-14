@@ -187,6 +187,7 @@ def health():
     return {
         "status": "healthy",
         "runtime": "v2",
+        "jupyter_port": jupyter_port,
     }
 
 
