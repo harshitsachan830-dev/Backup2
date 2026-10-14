@@ -32,6 +32,66 @@ const pythonExecutable =
 const mode = process.argv[2] ?? "dev";
 const runWebsite = mode !== "companion";
 
+async function ensurePythonEnvironment() {
+  try {
+    await access(pythonExecutable);
+    return;
+  } catch (error) {
+    if (error.code !== "ENOENT") {
+      throw error;
+    }
+  }
+
+  console.log("Preparing the local Python environment for ModelMind services.");
+  const setupEnvironment = {
+    ...process.env,
+    MODELMIND_JUPYTER_PORT: String(jupyterPort),
+    MODELMIND_SETUP_ONLY: "1",
+  };
+  if (process.platform === "win32") {
+    await runCommand(
+      "powershell.exe",
+      [
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        platformScript,
+        "-Port",
+        String(jupyterPort),
+        "-SetupOnly",
+      ],
+      { cwd: repositoryDirectory, env: setupEnvironment },
+    );
+  } else {
+    await runCommand("bash", [platformScript], {
+      cwd: repositoryDirectory,
+      env: { ...setupEnvironment, PORT: String(jupyterPort) },
+    });
+  }
+  await access(pythonExecutable);
+}
+
+function runCommand(command, args, options) {
+  return new Promise((resolveCommand, rejectCommand) => {
+    const child = spawn(command, args, { stdio: "inherit", ...options });
+    child.once("error", rejectCommand);
+    child.once("close", (code, signal) => {
+      if (code === 0) {
+        resolveCommand();
+      } else {
+        rejectCommand(
+          new Error(
+            `${command} setup exited ${
+              signal ? `after ${signal}` : `with code ${code}`
+            }.`,
+          ),
+        );
+      }
+    });
+  });
+}
+
 async function isJupyterRunning() {
   try {
     const response = await fetch(`http://127.0.0.1:${jupyterPort}/api`, {
@@ -214,7 +274,7 @@ try {
   if (await isBackendRunning()) {
     console.log(`Using the existing local ModelMind API at ${apiUrl}.`);
   } else {
-    await access(pythonExecutable);
+    await ensurePythonEnvironment();
     const localOrigins = await readLocalOriginSetting();
     console.log(`Starting the local ModelMind API at ${apiUrl}.`);
     startChild(

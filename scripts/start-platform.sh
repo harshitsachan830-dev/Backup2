@@ -53,6 +53,11 @@ if [[ -L "$EXTENSION_LINK" ]]; then
 fi
 "$PYTHON_BIN" -m pip install "$ROOT_DIR/extensions/error-assistant"
 
+if [[ "${MODELMIND_SETUP_ONLY:-0}" == "1" ]]; then
+  echo "ModelMind Python environment is ready."
+  exit 0
+fi
+
 if ! command -v ollama >/dev/null 2>&1; then
   echo "Ollama is not installed. The local AI route is optional; install it from https://ollama.com/download"
   echo "Model installation remains explicit and must be approved before any pull command."

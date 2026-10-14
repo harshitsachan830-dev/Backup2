@@ -41,7 +41,7 @@ jobs:
         if: matrix.platform == 'macOS'
         env:
           MODELMIND_PACKAGE_SUFFIX: ${{ matrix.suffix }}
-          MODELMIND_APP_VERSION: "0.1.1"
+          MODELMIND_APP_VERSION: "0.1.2"
         run: |
           bash -n scripts/start-beta-macos.command
           bash -n scripts/start-platform.sh
@@ -51,7 +51,7 @@ jobs:
         shell: pwsh
         env:
           MODELMIND_PACKAGE_SUFFIX: ${{ matrix.suffix }}
-          MODELMIND_APP_VERSION: "0.1.1"
+          MODELMIND_APP_VERSION: "0.1.2"
         run: |
           $tokens = $null
           $errors = $null

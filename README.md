@@ -56,7 +56,9 @@ include Node.js and Python runtimes, keep notebooks and the virtual environment
 in the user's writable folders, and download Jupyter/Python packages the first
 time they are opened. macOS packages use a checksum-pinned, relocatable CPython
 build and verify that it can create and run a virtual environment from the
-staged app bundle.
+staged app bundle. If an older Jupyter server is already running, the
+companion still prepares its own Python environment before starting the local
+API required by the notebook handoff.
 They still include application files and are published only as private
 prereleases; do not share them publicly. They point to the staging website and
 are not a production release. Public distribution requires a production

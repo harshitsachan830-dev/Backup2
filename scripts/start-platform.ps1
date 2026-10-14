@@ -1,7 +1,8 @@
 param(
     [string]$Port = "8899",
     [string]$Workspace = (Resolve-Path (Join-Path $PSScriptRoot "..")),
-    [string]$PythonExe = "py"
+    [string]$PythonExe = "py",
+    [switch]$SetupOnly
 )
 
 $ErrorActionPreference = "Stop"
@@ -83,6 +84,11 @@ if (Test-Path -LiteralPath $extensionLink) {
     }
 }
 & $python -m pip install (Join-Path $root "extensions\error-assistant")
+
+if ($SetupOnly -or $env:MODELMIND_SETUP_ONLY -eq "1") {
+    Write-Host "ModelMind Python environment is ready."
+    exit 0
+}
 
 if (-not (Get-Command ollama -ErrorAction SilentlyContinue)) {
     Write-Host "Ollama is not installed. The local AI route is optional; install it from https://ollama.com/download"
