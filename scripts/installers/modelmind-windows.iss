@@ -18,11 +18,14 @@ Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
 
+SetupIconFile={#PackageRoot}\modelmind-source\app\favicon.ico
+
 [Files]
 Source: "{#PackageRoot}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
-Name: "{userprograms}\ModelMind\Start ModelMind"; Filename: "{app}\scripts\start-beta-windows.cmd"
+Name: "{autodesktop}\ModelMind"; Filename: "{app}\scripts\start-beta-windows.cmd"; IconFilename: "{app}\modelmind-source\app\favicon.ico"
+Name: "{userprograms}\ModelMind\Start ModelMind"; Filename: "{app}\scripts\start-beta-windows.cmd"; IconFilename: "{app}\modelmind-source\app\favicon.ico"
 Name: "{userprograms}\ModelMind\Uninstall ModelMind"; Filename: "{uninstallexe}"
 
 [Messages]

