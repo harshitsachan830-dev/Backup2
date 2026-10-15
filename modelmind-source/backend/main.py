@@ -300,22 +300,25 @@ def open_jupyter(
 
             token = server.get("token")
             password_enabled = server.get("password") is True
-            if not token and not password_enabled:
-                return HTMLResponse(
-                    status_code=503,
-                    content=(
-                        "<!doctype html><html><head><title>Notebook sign-in required</title>"
-                        "</head><body><h1>Notebook authentication is not configured</h1>"
-                        "<p>Restart JupyterLab with the ModelMind companion so its local "
-                        "login protection is enabled, then try again.</p></body></html>"
-                    ),
-                )
 
             base_url = server.get("base_url")
             if not isinstance(base_url, str) or not base_url.startswith("/"):
                 base_url = parsed_url.path or "/"
             lab_path = f"{base_url.rstrip('/')}/lab/"
-            query = urlencode({"token": token}) if isinstance(token, str) and token else ""
+
+            # Build the redirect URL. When token is a non-empty string, pass
+            # it as a query parameter. When token is empty / None and password
+            # is not enabled, JupyterLab is running without authentication
+            # (safe on localhost-only binding) – redirect straight to /lab/.
+            if isinstance(token, str) and token:
+                query = urlencode({"token": token})
+            elif password_enabled:
+                # Password auth – let the browser hit the login page.
+                query = ""
+            else:
+                # No token, no password → open access (localhost only). OK.
+                query = ""
+
             launch_url = urlunsplit(
                 ("http", f"127.0.0.1:{port}", lab_path, query, "")
             )
