@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   package:
-    name: Package ${{ matrix.asset }}
+    name: Package ${{ matrix.name }}
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
@@ -20,15 +20,15 @@ jobs:
           - platform: macOS
             runner: macos-26
             suffix: macOS-arm64
-            asset: ModelMind-Setup-macOS-arm64.dmg
+            name: macOS-arm64
           - platform: macOS
             runner: macos-26-intel
             suffix: macOS-x64
-            asset: ModelMind-Setup-macOS-x64.dmg
+            name: macOS-x64
           - platform: Windows
             runner: windows-latest
             suffix: Windows-x64
-            asset: ModelMind-Setup-Windows-x64.exe
+            name: Windows-x64
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -39,7 +39,7 @@ jobs:
           python-version: "3.12"
       - name: Test managed Jupyter port selection
         run: node --test modelmind-source/scripts/jupyter-runtime.test.mjs
-      - name: Validate and build macOS DMG
+      - name: Validate and build macOS installers (PKG and DMG)
         if: matrix.platform == 'macOS'
         env:
           MODELMIND_PACKAGE_SUFFIX: ${{ matrix.suffix }}
@@ -77,8 +77,9 @@ jobs:
           & scripts/package-private-windows.ps1
       - uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.asset }}
-          path: ${{ runner.temp }}/${{ matrix.asset }}
+          name: ModelMind-${{ matrix.name }}
+          path: |
+            ${{ runner.temp }}/ModelMind-Setup-${{ matrix.suffix }}.*
           if-no-files-found: error
           retention-days: 7
 
@@ -93,28 +94,44 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           path: release-assets
-          pattern: ModelMind-Setup-*
+          pattern: ModelMind-*
           merge-multiple: true
       - name: Create release notes
         run: |
           cat << 'EOF' > release-notes.md
-          ## ModelMind Install Guide
+          ## ModelMind Installers & User Guide
 
-          ### macOS (DMG)
-          1. Download **ModelMind-Setup-macOS-arm64.dmg** (Apple Silicon M1/M2/M3/M4) or **ModelMind-Setup-macOS-x64.dmg** (Intel).
-          2. Open the `.dmg` file.
-          3. **Drag ModelMind into the Applications folder**.
-          4. Open Applications and double-click **ModelMind**.
-          5. If macOS shows an unverified developer dialog, right-click **ModelMind -> Open** (or go to **System Settings -> Privacy & Security -> Open Anyway**).
+          ### 🍎 macOS Installers
+          Both **.DMG** (drag-and-drop) and **.PKG** (guided installer) formats are available:
 
-          ### Windows
-          1. Download **ModelMind-Setup-Windows-x64.exe**.
-          2. Double-click to install.
-          3. If SmartScreen shows a warning, click **More info -> Run anyway**.
+          #### Apple Silicon (M1 / M2 / M3 / M4):
+          - **DMG**: `ModelMind-Setup-macOS-arm64.dmg` — Open and drag to Applications
+          - **PKG**: `ModelMind-Setup-macOS-arm64.pkg` — Double-click to run setup wizard
 
-          ### Setup
-          - The dashboard opens in your browser automatically.
-          - In the notebook, paste your Gemini API key in the API Key sidebar tab.
+          #### Intel Mac:
+          - **DMG**: `ModelMind-Setup-macOS-x64.dmg` — Open and drag to Applications
+          - **PKG**: `ModelMind-Setup-macOS-x64.pkg` — Double-click to run setup wizard
+
+          > **Note for macOS users**: If you see an "unidentified developer" prompt on first launch, right-click the app/package and choose **Open**, or go to **System Settings → Privacy & Security → Open Anyway**.
+
+          #### ⚡ 1-Line Fast Install (No Gatekeeper Prompts)
+          You can also install directly from Terminal without any Gatekeeper prompt:
+          ```bash
+          curl -fsSL https://raw.githubusercontent.com/harshitsachan830-dev/Backup2/main/scripts/install-mac.sh | bash
+          ```
+
+          ---
+
+          ### 🪟 Windows (64-bit)
+          - **EXE**: `ModelMind-Setup-Windows-x64.exe`
+          - If SmartScreen appears, click **More info → Run anyway**.
+
+          ---
+
+          ### 🚀 First Launch Setup
+          1. Launch ModelMind — your default browser will open the dashboard.
+          2. In the notebook, paste your Google Gemini API key into the **API Key** tab in the right sidebar.
+          3. For local offline AI models, install Ollama from [ollama.com](https://ollama.com).
           EOF
       - name: Create private prerelease
         env:

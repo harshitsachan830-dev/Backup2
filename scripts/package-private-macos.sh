@@ -108,12 +108,23 @@ fi
 rm -rf "$PACKAGE_ROOT/runtime-smoke-test"
 
 # ─────────────────────────────────────────────────────
-# Build a drag-to-Applications .DMG (headless CI safe)
+# Build both .PKG and .DMG installers
 # ─────────────────────────────────────────────────────
 asset_suffix="${MODELMIND_PACKAGE_SUFFIX:-macOS}"
+PKG_FINAL="${RUNNER_TEMP:-$ROOT_DIR}/ModelMind-Setup-${asset_suffix}.pkg"
 DMG_STAGING="$PACKAGE_ROOT/dmg-staging"
 DMG_FINAL="${RUNNER_TEMP:-$ROOT_DIR}/ModelMind-Setup-${asset_suffix}.dmg"
 
+# 1. Build .pkg installer (while $PACKAGE_ROOT contains only ModelMind.app)
+pkgbuild \
+  --root "$PACKAGE_ROOT" \
+  --identifier com.modelmind.companion \
+  --version "$APP_VERSION" \
+  --install-location /Applications \
+  "$PKG_FINAL"
+printf 'Built PKG successfully: %s\n' "$PKG_FINAL"
+
+# 2. Build .dmg drag-to-Applications installer
 mkdir -p "$DMG_STAGING"
 cp -R "$APP_BUNDLE" "$DMG_STAGING/ModelMind.app"
 ln -s /Applications "$DMG_STAGING/Applications"
