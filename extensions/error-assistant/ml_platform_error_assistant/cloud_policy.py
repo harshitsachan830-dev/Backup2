@@ -2,7 +2,7 @@ import os
 
 from .credentials import get_stored_gemini_api_key
 
-DEFAULT_CLOUD_FALLBACK_MODE = "disabled"
+DEFAULT_CLOUD_FALLBACK_MODE = "enabled"
 VALID_CLOUD_FALLBACK_MODES = {"disabled", "local_only", "enabled"}
 
 

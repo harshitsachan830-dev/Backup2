@@ -75,9 +75,22 @@ type FixActions = {
 };
 
 function getTargetCell(notebooks: INotebookTracker): NotebookCell | null {
-  return (
-    notebooks.activeCell ?? notebooks.currentWidget?.content.activeCell ?? null
-  );
+  const active =
+    notebooks.activeCell ?? notebooks.currentWidget?.content.activeCell ?? null;
+  if (active && captureActiveError(active)) {
+    return active;
+  }
+  const currentWidget = notebooks.currentWidget;
+  if (currentWidget) {
+    const cells = currentWidget.content.widgets;
+    for (let i = cells.length - 1; i >= 0; i--) {
+      const cell = cells[i];
+      if (cell && captureActiveError(cell)) {
+        return cell;
+      }
+    }
+  }
+  return active;
 }
 
 function captureActiveError(cell: NotebookCell | null): CapturedError | null {

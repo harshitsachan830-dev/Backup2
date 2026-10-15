@@ -12,8 +12,8 @@ from .ollama import _build_fix_hint, validate_fix_response
 from .credentials import get_stored_gemini_api_key
 
 GEMINI_API_BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
-GEMINI_DEFAULT_MODEL = "gemini-3.8-flash"
-GEMINI_FALLBACK_MODELS = ("gemini-3.5-flash", "gemini-flash-latest")
+GEMINI_DEFAULT_MODEL = "gemini-2.5-flash"
+GEMINI_FALLBACK_MODELS = ("gemini-2.0-flash", "gemini-1.5-flash", "gemini-flash-latest")
 GEMINI_TIMEOUT_SECONDS = 60.0
 GEMINI_MAX_REQUEST_BYTES = 65_536
 GEMINI_MAX_RESPONSE_BYTES = 32_768

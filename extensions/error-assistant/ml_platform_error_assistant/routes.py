@@ -1,6 +1,7 @@
 import json
 import os
 import pathlib
+import sys
 
 import tornado
 
@@ -475,18 +476,69 @@ class ValidateFixHandler(APIHandler):
 # =========================================================
 
 def _resolve_dataset_path(file_path: str) -> pathlib.Path:
-    p = pathlib.Path(file_path)
-    if p.exists() and p.is_file():
+    raw = file_path.strip().strip("'\"")
+    p = pathlib.Path(raw)
+    if p.is_absolute() and p.exists() and p.is_file():
         return p
-    # Try current working directory
-    cwd_p = pathlib.Path.cwd() / file_path
-    if cwd_p.exists() and cwd_p.is_file():
-        return cwd_p
-    # Try stripping leading slashes
-    clean_rel = file_path.lstrip("/\\")
-    cwd_clean = pathlib.Path.cwd() / clean_rel
-    if cwd_clean.exists() and cwd_clean.is_file():
-        return cwd_clean
+
+    clean_rel = raw.lstrip("/\\")
+    filename = pathlib.Path(clean_rel).name
+
+    # Candidate root directories to check in priority order
+    candidate_dirs: list[pathlib.Path] = []
+
+    # 1. Active WORKSPACE environment variable
+    env_ws = os.environ.get("WORKSPACE")
+    if env_ws:
+        candidate_dirs.append(pathlib.Path(env_ws))
+
+    # 2. User's standard ModelMind workspace
+    candidate_dirs.append(pathlib.Path.home() / "ModelMind Notebooks")
+
+    # 3. Documents/ModelMind Notebooks (Windows standard)
+    if sys.platform == "win32":
+        user_profile = os.environ.get("USERPROFILE")
+        if user_profile:
+            candidate_dirs.append(pathlib.Path(user_profile) / "Documents" / "ModelMind Notebooks")
+
+    # 4. Current working directory
+    candidate_dirs.append(pathlib.Path.cwd())
+
+    # 5. Application / repository root
+    app_root = pathlib.Path(__file__).resolve().parents[2]
+    candidate_dirs.append(app_root)
+
+    # 6. User data dir
+    user_data = os.environ.get("MODELMIND_USER_DATA_DIR")
+    if user_data:
+        candidate_dirs.append(pathlib.Path(user_data))
+
+    # First pass: direct relative path check in each candidate dir
+    for base in candidate_dirs:
+        try:
+            if not base.exists():
+                continue
+            direct = base / raw
+            if direct.exists() and direct.is_file():
+                return direct
+            cleaned = base / clean_rel
+            if cleaned.exists() and cleaned.is_file():
+                return cleaned
+        except Exception:
+            continue
+
+    # Second pass: recursive search in candidate directories for the filename
+    if filename:
+        for base in candidate_dirs:
+            try:
+                if not base.exists() or not base.is_dir():
+                    continue
+                for match in base.rglob(filename):
+                    if match.is_file():
+                        return match
+            except Exception:
+                continue
+
     return p
 
 

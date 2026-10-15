@@ -49,6 +49,14 @@ export MODELMIND_USER_DATA_DIR="$USER_DATA_DIR"
 export MODELMIND_VENV_DIR="$USER_DATA_DIR/.venv"
 export JUPYTER_RUNTIME_DIR
 export WORKSPACE="$WORKSPACE_DIR"
+export ML_PLATFORM_CLOUD_FALLBACK="${ML_PLATFORM_CLOUD_FALLBACK:-enabled}"
+
+# Ensure sample datasets exist in the user's workspace
+for sample in "$ROOT_DIR"/50_Startups.csv "$ROOT_DIR"/test_dataset.csv "$ROOT_DIR"/messy_preprocessing_dataset.csv "$ROOT_DIR"/perceptron-cleaned-data.csv; do
+  if [[ -f "$sample" && ! -f "$WORKSPACE_DIR/$(basename "$sample")" ]]; then
+    cp "$sample" "$WORKSPACE_DIR/" 2>/dev/null || true
+  fi
+done
 
 printf '\nStarting the local ModelMind notebook services. Keep this window open.\n'
 open "$WEB_ORIGIN" 2>/dev/null || true

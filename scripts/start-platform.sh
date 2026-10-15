@@ -26,6 +26,7 @@ if [[ -f "$ENV_FILE" ]]; then
   done < "$ENV_FILE"
   echo "Loaded Gemini settings from .env (values hidden)."
 fi
+export ML_PLATFORM_CLOUD_FALLBACK="${ML_PLATFORM_CLOUD_FALLBACK:-enabled}"
 
 if [[ ! -x "$VENV_DIR/bin/python" ]]; then
   echo "Creating local virtual environment at $VENV_DIR"

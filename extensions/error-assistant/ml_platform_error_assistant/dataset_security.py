@@ -97,7 +97,20 @@ def resolve_workspace_dataset(
     candidate = Path(raw_path)
 
     if not candidate.is_absolute():
-        candidate = root / candidate
+        direct = root / candidate
+        if direct.exists() and direct.is_file():
+            candidate = direct
+        else:
+            filename = candidate.name
+            found = None
+            try:
+                for match in root.rglob(filename):
+                    if match.is_file():
+                        found = match
+                        break
+            except Exception:
+                pass
+            candidate = found or direct
 
     try:
         resolved = candidate.resolve(strict=True)

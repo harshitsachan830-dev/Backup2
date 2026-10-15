@@ -108,7 +108,7 @@
     "extension": true,
     "outputDir": "ml_platform_error_assistant/labextension",
     "_build": {
-      "load": "static/remoteEntry.7e58e12c3be3892c.js",
+      "load": "static/remoteEntry.3133d63aa3044092.js",
       "extension": "./extension",
       "style": "./style"
     }
