@@ -18,4 +18,4 @@ c.Branding.short_name = "ModelMind Notebook"
 # 127.0.0.1 (localhost) and is never exposed to the network.
 c.ServerApp.token = ""
 c.ServerApp.password = ""
-c.ServerApp.open_browser = True
+c.ServerApp.open_browser = False

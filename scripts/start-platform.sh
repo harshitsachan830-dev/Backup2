@@ -80,6 +80,6 @@ exec "$JUPYTER_BIN" lab \
   --ServerApp.ip=127.0.0.1 \
   --ServerApp.token='' \
   --ServerApp.password='' \
-  --ServerApp.open_browser=True \
-  --LabServerApp.open_browser=True \
+  --ServerApp.open_browser=False \
+  --LabServerApp.open_browser=False \
   --ServerApp.root_dir "$WORKSPACE"
