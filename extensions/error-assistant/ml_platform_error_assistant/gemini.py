@@ -1,3 +1,4 @@
+import asyncio
 import json
 import os
 import re
@@ -12,8 +13,17 @@ from .ollama import _build_fix_hint, validate_fix_response
 from .credentials import get_stored_gemini_api_key
 
 GEMINI_API_BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
-GEMINI_DEFAULT_MODEL = "gemini-2.5-flash"
-GEMINI_FALLBACK_MODELS = ("gemini-2.0-flash", "gemini-1.5-flash", "gemini-flash-latest")
+# Primary model — stable, low-latency, supports structured-output JSON schema.
+# Fallbacks are tried in order when the primary returns 503 (overloaded) or 404.
+GEMINI_DEFAULT_MODEL = "gemini-3.5-flash-lite"
+GEMINI_FALLBACK_MODELS = (
+    "gemini-flash-lite-latest",   # alias for the latest flash-lite release
+    "gemini-3.5-flash",           # heavier model — only when lite is unavailable
+    "gemini-flash-latest",        # generic latest alias
+)
+# Maximum number of 503 retries per model before moving to the next fallback.
+_GEMINI_MAX_503_RETRIES = 2
+_GEMINI_RETRY_BASE_DELAY = 1.0   # seconds (doubled each retry)
 GEMINI_TIMEOUT_SECONDS = 60.0
 GEMINI_MAX_REQUEST_BYTES = 65_536
 GEMINI_MAX_RESPONSE_BYTES = 32_768
@@ -134,20 +144,37 @@ async def suggest_fix_with_gemini(error, notebook_context="", client=None):
                 follow_redirects=False,
                 ssl_options=ssl.create_default_context(cafile=certifi.where()),
             )
-            try:
-                resp = await client.fetch(request, raise_error=False)
-                if resp.code == 200 and len(resp.body) <= GEMINI_MAX_RESPONSE_BYTES:
-                    response = resp
-                    successful_model = m_id
+            # Retry on 503 (overloaded) with exponential back-off; skip 404 immediately.
+            for attempt in range(_GEMINI_MAX_503_RETRIES + 1):
+                try:
+                    resp = await client.fetch(request, raise_error=False)
+                    if resp.code == 200 and len(resp.body) <= GEMINI_MAX_RESPONSE_BYTES:
+                        response = resp
+                        successful_model = m_id
+                        break
+                    elif resp.code == 404:
+                        # Model deprecated — no point retrying
+                        break
+                    elif resp.code == 503:
+                        try:
+                            err_json = json.loads(resp.body)
+                            last_error_message = err_json.get("error", {}).get("message")
+                        except Exception:
+                            pass
+                        if attempt < _GEMINI_MAX_503_RETRIES:
+                            await asyncio.sleep(_GEMINI_RETRY_BASE_DELAY * (2 ** attempt))
+                        # else: fall through to next model
+                    else:
+                        try:
+                            err_json = json.loads(resp.body)
+                            last_error_message = err_json.get("error", {}).get("message")
+                        except Exception:
+                            pass
+                        break  # Non-retryable error, move to next model
+                except (HTTPError, OSError, TimeoutError):
                     break
-                else:
-                    try:
-                        err_json = json.loads(resp.body)
-                        last_error_message = err_json.get("error", {}).get("message")
-                    except Exception:
-                        pass
-            except (HTTPError, OSError, TimeoutError):
-                pass
+            if response is not None:
+                break
     finally:
         if owns_client:
             client.close()
@@ -283,20 +310,37 @@ async def chat_with_gemini(message, history=None, context=None, client=None):
                 follow_redirects=False,
                 ssl_options=ssl.create_default_context(cafile=certifi.where()),
             )
-            try:
-                resp = await client.fetch(request, raise_error=False)
-                if resp.code == 200 and len(resp.body) <= GEMINI_CHAT_MAX_RESPONSE_BYTES:
-                    response = resp
-                    successful_model = m_id
+            # Retry on 503 (overloaded) with exponential back-off; skip 404 immediately.
+            for attempt in range(_GEMINI_MAX_503_RETRIES + 1):
+                try:
+                    resp = await client.fetch(request, raise_error=False)
+                    if resp.code == 200 and len(resp.body) <= GEMINI_CHAT_MAX_RESPONSE_BYTES:
+                        response = resp
+                        successful_model = m_id
+                        break
+                    elif resp.code == 404:
+                        # Model deprecated — skip immediately
+                        break
+                    elif resp.code == 503:
+                        try:
+                            err_json = json.loads(resp.body)
+                            last_error_message = err_json.get("error", {}).get("message")
+                        except Exception:
+                            pass
+                        if attempt < _GEMINI_MAX_503_RETRIES:
+                            await asyncio.sleep(_GEMINI_RETRY_BASE_DELAY * (2 ** attempt))
+                        # else: fall through to next model
+                    else:
+                        try:
+                            err_json = json.loads(resp.body)
+                            last_error_message = err_json.get("error", {}).get("message")
+                        except Exception:
+                            pass
+                        break  # Non-retryable error, move to next model
+                except (HTTPError, OSError, TimeoutError):
                     break
-                else:
-                    try:
-                        err_json = json.loads(resp.body)
-                        last_error_message = err_json.get("error", {}).get("message")
-                    except Exception:
-                        pass
-            except (HTTPError, OSError, TimeoutError):
-                pass
+            if response is not None:
+                break
     finally:
         if owns_client:
             client.close()
