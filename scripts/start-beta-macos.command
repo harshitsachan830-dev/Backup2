@@ -50,11 +50,9 @@ export MODELMIND_VENV_DIR="$USER_DATA_DIR/.venv"
 export JUPYTER_RUNTIME_DIR
 export WORKSPACE="$WORKSPACE_DIR"
 
-if ! open "$WEB_ORIGIN"; then
-  fail "Could not open the ModelMind dashboard in your browser."
-fi
-
 printf '\nStarting the local ModelMind notebook services. Keep this window open.\n'
+open "$WEB_ORIGIN" 2>/dev/null || true
+
 if MODELMIND_WEB_ORIGINS="$WEB_ORIGIN" "$NODE_BIN" "$APP_DIR/scripts/run-local.mjs" companion; then
   exit 0
 else

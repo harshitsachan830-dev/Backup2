@@ -21,6 +21,13 @@ if (-not (Test-Path (Join-Path $packageRoot "modelmind-source\scripts\run-local.
     throw "The archived ModelMind companion files are incomplete."
 }
 
+$sourceLabExtension = Join-Path $root "extensions\error-assistant\ml_platform_error_assistant\labextension"
+$targetLabExtension = Join-Path $packageRoot "extensions\error-assistant\ml_platform_error_assistant\labextension"
+if (Test-Path $sourceLabExtension) {
+    New-Item -ItemType Directory -Path $targetLabExtension -Force | Out-Null
+    Copy-Item -Path (Join-Path $sourceLabExtension "*") -Destination $targetLabExtension -Recurse -Force
+}
+
 $nodePath = (& node -p "process.execPath").Trim()
 if ($LASTEXITCODE -ne 0) {
     throw "Could not locate the Node.js runtime."

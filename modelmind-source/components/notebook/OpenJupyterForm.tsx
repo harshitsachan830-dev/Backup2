@@ -36,14 +36,18 @@ export default function OpenJupyterForm({
         detail?: string;
         launch_id?: string;
       };
-      if (!response.ok || !result.launch_id) {
-        throw new Error(
-          result.detail ?? "Could not connect to the local notebook companion.",
-        );
+      if (response.ok && result.launch_id) {
+        notebookWindow.location.href =
+          `${API_URL}/jupyter/open?launch_id=${encodeURIComponent(result.launch_id)}`;
+        return;
       }
+    } catch {
+      // Browsers like Safari block HTTPS-to-HTTP localhost fetch as mixed content.
+      // Top-level window navigation is permitted and sends the trusted Referer header.
+    }
 
-      notebookWindow.location.href =
-        `${API_URL}/jupyter/open?launch_id=${encodeURIComponent(result.launch_id)}`;
+    try {
+      notebookWindow.location.href = `${API_URL}/jupyter/open`;
     } catch (cause) {
       notebookWindow.close();
       setError(
@@ -67,9 +71,19 @@ export default function OpenJupyterForm({
         {opening ? "Connecting..." : children}
       </button>
       {error && (
-        <p className="jupyterLaunchError" role="alert">
-          {error}
-        </p>
+        <div className="jupyterLaunchError" role="alert" style={{ marginTop: "0.5rem" }}>
+          <p>{error}</p>
+          <p style={{ marginTop: "0.25rem" }}>
+            <a
+              href={`${API_URL}/jupyter/open`}
+              target="_blank"
+              rel="noreferrer"
+              style={{ textDecoration: "underline", color: "inherit", fontWeight: 600 }}
+            >
+              Open Notebook directly ↗
+            </a>
+          </p>
+        </div>
       )}
     </>
   );

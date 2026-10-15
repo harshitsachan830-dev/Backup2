@@ -74,16 +74,19 @@ $python = Join-Path $venv "Scripts\python.exe"
 $jupyter = Join-Path $venv "Scripts\jupyter.exe"
 $extensionLink = Join-Path $venv "share\jupyter\labextensions\@ml-platform\error-assistant"
 
-& $python -m pip install --upgrade pip
-& $python -m pip install -r (Join-Path $root "requirements.txt")
-& $python -m pip install -r (Join-Path $root "modelmind-source\backend\requirements.txt")
-if (Test-Path -LiteralPath $extensionLink) {
-    $extensionItem = Get-Item -LiteralPath $extensionLink -Force
-    if ($extensionItem.LinkType) {
-        Remove-Item -LiteralPath $extensionLink
+if (-not (Test-Path $jupyter) -or $SetupOnly -or $env:MODELMIND_SETUP_ONLY -eq "1") {
+    Write-Host "Installing ModelMind dependencies into virtual environment..."
+    & $python -m pip install --upgrade pip
+    & $python -m pip install -r (Join-Path $root "requirements.txt")
+    & $python -m pip install -r (Join-Path $root "modelmind-source\backend\requirements.txt")
+    if (Test-Path -LiteralPath $extensionLink) {
+        $extensionItem = Get-Item -LiteralPath $extensionLink -Force
+        if ($extensionItem.LinkType) {
+            Remove-Item -LiteralPath $extensionLink
+        }
     }
+    & $python -m pip install (Join-Path $root "extensions\error-assistant")
 }
-& $python -m pip install (Join-Path $root "extensions\error-assistant")
 
 if ($SetupOnly -or $env:MODELMIND_SETUP_ONLY -eq "1") {
     Write-Host "ModelMind Python environment is ready."

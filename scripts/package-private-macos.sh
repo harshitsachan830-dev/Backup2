@@ -8,7 +8,7 @@ APP_CONTENTS="$APP_BUNDLE/Contents"
 APP_RESOURCES="$APP_CONTENTS/Resources/app"
 PYTHON_VERSION="3.12.15"
 PYTHON_BUILD_DATE="20261013"
-APP_VERSION="${MODELMIND_APP_VERSION:-0.1.3}"
+APP_VERSION="${MODELMIND_APP_VERSION:-0.1.4}"
 
 rm -rf "$PACKAGE_ROOT"
 mkdir -p "$APP_CONTENTS/MacOS" "$APP_RESOURCES/runtime/node/bin" \
@@ -17,6 +17,12 @@ git -C "$ROOT_DIR" archive HEAD | tar -x -C "$APP_RESOURCES"
 if [[ ! -f "$APP_RESOURCES/modelmind-source/scripts/run-local.mjs" ]]; then
   printf 'The archived ModelMind companion files are incomplete.\n' >&2
   exit 1
+fi
+
+if [[ -d "$ROOT_DIR/extensions/error-assistant/ml_platform_error_assistant/labextension" ]]; then
+  mkdir -p "$APP_RESOURCES/extensions/error-assistant/ml_platform_error_assistant/labextension"
+  cp -R "$ROOT_DIR/extensions/error-assistant/ml_platform_error_assistant/labextension/"* \
+    "$APP_RESOURCES/extensions/error-assistant/ml_platform_error_assistant/labextension/"
 fi
 
 node_binary="$(node -p 'process.execPath')"

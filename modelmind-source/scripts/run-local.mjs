@@ -346,7 +346,30 @@ try {
       cwd: appDirectory,
     });
   } else {
-    console.log("Local notebook services are ready. Press Ctrl+C to stop them.");
+    const launchUrl = `${apiUrl}/jupyter/open`;
+    console.log("\n=======================================================");
+    console.log(" ModelMind Notebook services are ready!");
+    console.log(` Direct Notebook launch URL: ${launchUrl}`);
+    console.log(` Local API URL:              ${apiUrl}`);
+    console.log(" Keep this window open while working with notebooks.");
+    console.log("=======================================================\n");
+
+    if (process.platform === "darwin") {
+      try {
+        spawn("open", [launchUrl], { stdio: "ignore", detached: true }).unref();
+      } catch {
+        // Non-fatal if browser cannot be spawned
+      }
+    } else if (process.platform === "win32") {
+      try {
+        spawn("cmd.exe", ["/c", "start", "", launchUrl], {
+          stdio: "ignore",
+          detached: true,
+        }).unref();
+      } catch {
+        // Non-fatal if browser cannot be spawned
+      }
+    }
   }
 } catch (error) {
   console.error("Could not start the local ModelMind services:", error);

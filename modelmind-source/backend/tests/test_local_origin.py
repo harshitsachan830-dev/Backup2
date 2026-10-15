@@ -147,3 +147,44 @@ def test_cors_preflight_advertises_only_a_configured_dashboard_origin():
     assert response.status_code == 200
     assert response.headers["access-control-allow-origin"] == "http://localhost:3000"
     assert "access-control-allow-credentials" not in response.headers
+
+
+def test_cors_preflight_advertises_private_network_access():
+    response = client.options(
+        "/jupyter/prepare",
+        headers={
+            "Origin": "http://localhost:3000",
+            "Access-Control-Request-Method": "POST",
+            "Access-Control-Request-Headers": "content-type",
+            "Access-Control-Request-Private-Network": "true",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.headers.get("access-control-allow-private-network") == "true"
+
+
+def test_jupyter_open_allows_direct_navigation_from_trusted_referer(monkeypatch):
+    def running_server(**kwargs):
+        assert kwargs["runtime_dir"]
+        return iter(
+            [
+                {
+                    "url": "http://localhost:8899/",
+                    "port": 8899,
+                    "base_url": "/",
+                    "token": "local-test-token",
+                    "password": False,
+                }
+            ]
+        )
+
+    monkeypatch.setattr("main.list_running_servers", running_server)
+    response = client.get(
+        "/jupyter/open",
+        headers={"Referer": "http://localhost:3000/notebook"},
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+    assert response.headers["location"] == "http://127.0.0.1:8899/lab/?token=local-test-token"
+

@@ -45,13 +45,16 @@ PYTHON_BIN="$VENV_DIR/bin/python"
 JUPYTER_BIN="$VENV_DIR/bin/jupyter"
 EXTENSION_LINK="$VENV_DIR/share/jupyter/labextensions/@ml-platform/error-assistant"
 
-"$PYTHON_BIN" -m pip install --upgrade pip
-"$PYTHON_BIN" -m pip install -r "$ROOT_DIR/requirements.txt"
-"$PYTHON_BIN" -m pip install -r "$ROOT_DIR/modelmind-source/backend/requirements.txt"
-if [[ -L "$EXTENSION_LINK" ]]; then
-  unlink "$EXTENSION_LINK"
+if [[ ! -x "$JUPYTER_BIN" || "${MODELMIND_SETUP_ONLY:-0}" == "1" ]]; then
+  echo "Installing ModelMind dependencies into virtual environment..."
+  "$PYTHON_BIN" -m pip install --upgrade pip
+  "$PYTHON_BIN" -m pip install -r "$ROOT_DIR/requirements.txt"
+  "$PYTHON_BIN" -m pip install -r "$ROOT_DIR/modelmind-source/backend/requirements.txt"
+  if [[ -L "$EXTENSION_LINK" ]]; then
+    unlink "$EXTENSION_LINK"
+  fi
+  "$PYTHON_BIN" -m pip install "$ROOT_DIR/extensions/error-assistant"
 fi
-"$PYTHON_BIN" -m pip install "$ROOT_DIR/extensions/error-assistant"
 
 if [[ "${MODELMIND_SETUP_ONLY:-0}" == "1" ]]; then
   echo "ModelMind Python environment is ready."

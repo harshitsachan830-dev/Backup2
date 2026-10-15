@@ -52,8 +52,12 @@ $env:MODELMIND_VENV_DIR = Join-Path $userDataDirectory ".venv"
 $env:JUPYTER_RUNTIME_DIR = $jupyterRuntimeDirectory
 $env:WORKSPACE = $workspaceDirectory
 
-Start-Process $websiteOrigin
 Write-Host "Starting the local ModelMind notebook services. Keep this window open."
+try {
+    Start-Process $websiteOrigin -ErrorAction SilentlyContinue
+} catch {
+    # Non-fatal if browser cannot be spawned directly
+}
 $env:MODELMIND_WEB_ORIGINS = $websiteOrigin
 & $node (Join-Path $appDirectory "scripts\run-local.mjs") companion
 if ($LASTEXITCODE -ne 0) {

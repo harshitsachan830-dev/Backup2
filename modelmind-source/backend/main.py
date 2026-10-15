@@ -97,6 +97,7 @@ app.add_middleware(
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["Content-Type", "Authorization"],
+    allow_private_network=True,
 )
 
 
@@ -211,9 +212,55 @@ def prepare_jupyter(request: Request):
 
 @app.get("/jupyter/open")
 def open_jupyter(
-    launch_id: str | None = Query(default=None, min_length=32, max_length=128),
+    request: Request,
+    launch_id: str | None = Query(default=None, max_length=128),
 ):
-    if launch_id is None:
+    valid_request = False
+    if launch_id is not None:
+        if len(launch_id) < 32:
+            return HTMLResponse(
+                status_code=403,
+                content=(
+                    "<!doctype html><html><head><title>Notebook link expired</title>"
+                    "</head><body><h1>This notebook link has expired</h1>"
+                    "<p>Return to ModelMind and choose Open Notebook again.</p></body></html>"
+                ),
+            )
+        expires_at = pending_jupyter_launches.pop(launch_id, None)
+        if expires_at is not None and expires_at > time.monotonic():
+            valid_request = True
+        else:
+            return HTMLResponse(
+                status_code=403,
+                content=(
+                    "<!doctype html><html><head><title>Notebook link expired</title>"
+                    "</head><body><h1>This notebook link has expired</h1>"
+                    "<p>Return to ModelMind and choose Open Notebook again.</p></body></html>"
+                ),
+            )
+
+    if not valid_request:
+        referer = request.headers.get("referer")
+        if referer:
+            try:
+                ref_parts = urlsplit(referer)
+                ref_origin = f"{ref_parts.scheme}://{ref_parts.netloc}"
+                if ref_origin in allowed_web_origins:
+                    valid_request = True
+            except Exception:
+                pass
+
+    if not valid_request:
+        origin = request.headers.get("origin")
+        if origin and origin in allowed_web_origins:
+            valid_request = True
+
+    if not valid_request:
+        client_host = request.client.host if request.client else ""
+        if client_host in {"127.0.0.1", "localhost", "::1"}:
+            valid_request = True
+
+    if not valid_request:
         return HTMLResponse(
             status_code=403,
             content=(
@@ -221,16 +268,6 @@ def open_jupyter(
                 "</head><body><h1>Open Notebook from ModelMind</h1>"
                 "<p>Return to ModelMind and choose Open Notebook to create a secure link.</p>"
                 "</body></html>"
-            ),
-        )
-    expires_at = pending_jupyter_launches.pop(launch_id, None)
-    if expires_at is None or expires_at <= time.monotonic():
-        return HTMLResponse(
-            status_code=403,
-            content=(
-                "<!doctype html><html><head><title>Notebook link expired</title>"
-                "</head><body><h1>This notebook link has expired</h1>"
-                "<p>Return to ModelMind and choose Open Notebook again.</p></body></html>"
             ),
         )
 
