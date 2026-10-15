@@ -20,11 +20,11 @@ jobs:
           - platform: macOS
             runner: macos-26
             suffix: macOS-arm64
-            asset: ModelMind-Setup-macOS-arm64.pkg
+            asset: ModelMind-Setup-macOS-arm64.dmg
           - platform: macOS
             runner: macos-26-intel
             suffix: macOS-x64
-            asset: ModelMind-Setup-macOS-x64.pkg
+            asset: ModelMind-Setup-macOS-x64.dmg
           - platform: Windows
             runner: windows-latest
             suffix: Windows-x64
@@ -39,11 +39,11 @@ jobs:
           python-version: "3.12"
       - name: Test managed Jupyter port selection
         run: node --test modelmind-source/scripts/jupyter-runtime.test.mjs
-      - name: Validate and build macOS installer
+      - name: Validate and build macOS DMG
         if: matrix.platform == 'macOS'
         env:
           MODELMIND_PACKAGE_SUFFIX: ${{ matrix.suffix }}
-          MODELMIND_APP_VERSION: "0.1.4"
+          MODELMIND_APP_VERSION: "0.2.2"
         run: |
           bash -n scripts/start-beta-macos.command
           bash -n scripts/start-platform.sh
@@ -53,7 +53,7 @@ jobs:
         shell: pwsh
         env:
           MODELMIND_PACKAGE_SUFFIX: ${{ matrix.suffix }}
-          MODELMIND_APP_VERSION: "0.1.4"
+          MODELMIND_APP_VERSION: "0.2.2"
         run: |
           $tokens = $null
           $errors = $null
@@ -102,5 +102,30 @@ jobs:
           gh release create "$GITHUB_REF_NAME" release-assets/* \
             --repo "$GITHUB_REPOSITORY" \
             --prerelease \
-            --title "ModelMind private companion prototype $GITHUB_REF_NAME" \
-            --notes "Unsigned installers for staging validation only. These private prototype packages include application files and bundled Node.js/Python runtimes. Jupyter packages install on first launch. Do not distribute publicly."
+            --title "ModelMind $GITHUB_REF_NAME" \
+            --notes "$(cat <<'EOF'
+## ModelMind — Install Guide
+
+### macOS
+1. Download **ModelMind-Setup-macOS-arm64.dmg** (Apple Silicon M1/M2/M3/M4) or **ModelMind-Setup-macOS-x64.dmg** (Intel Mac).
+2. Open the `.dmg` file — a window opens with the ModelMind icon and an Applications shortcut.
+3. **Drag ModelMind into the Applications folder**.
+4. Eject the DMG.
+5. Open Launchpad or Applications and **double-click ModelMind**.
+6. macOS will ask: *"ModelMind is an app downloaded from the internet. Are you sure?"* — click **Open**.
+7. A Terminal window starts the local services. Keep it open while using ModelMind.
+
+### Windows
+1. Download **ModelMind-Setup-Windows-x64.exe**.
+2. Double-click it to install.
+3. If SmartScreen shows a warning, click **More info → Run anyway**.
+
+### First Launch
+- The ModelMind dashboard opens in your browser automatically.
+- To use the AI chatbot, go to the **API Key** tab in the right sidebar and paste your Gemini API key from [aistudio.google.com](https://aistudio.google.com).
+- Ollama (optional local AI) can be installed from [ollama.com](https://ollama.com).
+
+---
+*Unsigned prototype — for testing only. Do not distribute publicly.*
+EOF
+)"
