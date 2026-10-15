@@ -53,7 +53,16 @@ if [[ ! -x "$JUPYTER_BIN" || "${MODELMIND_SETUP_ONLY:-0}" == "1" ]]; then
   if [[ -L "$EXTENSION_LINK" ]]; then
     unlink "$EXTENSION_LINK"
   fi
-  "$PYTHON_BIN" -m pip install "$ROOT_DIR/extensions/error-assistant"
+  # Install the ModelMind extension. Prefer a pre-built wheel (no network or
+  # Node.js required); fall back to a source install with --no-build-isolation
+  # so the venv's own hatchling is reused instead of downloading from PyPI.
+  if ls "$ROOT_DIR"/wheels/ml_platform_error_assistant-*.whl 1>/dev/null 2>&1; then
+    echo "Installing ModelMind extension from pre-built wheel..."
+    "$PYTHON_BIN" -m pip install --no-deps "$ROOT_DIR"/wheels/ml_platform_error_assistant-*.whl
+  else
+    echo "Pre-built wheel not found – installing from source (requires hatchling)..."
+    "$PYTHON_BIN" -m pip install --no-build-isolation "$ROOT_DIR/extensions/error-assistant"
+  fi
 fi
 
 if [[ "${MODELMIND_SETUP_ONLY:-0}" == "1" ]]; then
