@@ -78,6 +78,8 @@ fi
 exec "$JUPYTER_BIN" lab \
   --port "$PORT" \
   --ServerApp.ip=127.0.0.1 \
+  --ServerApp.token='' \
+  --ServerApp.password='' \
   --ServerApp.open_browser=True \
   --LabServerApp.open_browser=True \
   --ServerApp.root_dir "$WORKSPACE"

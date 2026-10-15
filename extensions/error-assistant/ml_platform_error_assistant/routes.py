@@ -108,10 +108,10 @@ class GeminiAPIKeyHandler(APIHandler):
         try:
             stored_key = get_stored_gemini_api_key()
         except Exception:
-            self.log.exception("Could not read the operating-system credential store.")
-            self.set_status(503)
-            self.finish(json.dumps({"error": "The system credential store is unavailable."}))
-            return
+            # Keychain is locked or denied – treat as "no stored key" so the
+            # UI stays responsive. The user can enter their API key via the UI.
+            self.log.debug("Keychain inaccessible; treating as no stored key.")
+            stored_key = None
 
         source = "desktop" if stored_key else "environment" if environment_key else None
         self.finish(json.dumps({"configured": bool(environment_key or stored_key), "source": source}))
