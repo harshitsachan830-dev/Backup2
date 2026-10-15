@@ -77,10 +77,12 @@ if ! command -v ollama >/dev/null 2>&1; then
 fi
 
 exec "$JUPYTER_BIN" lab \
+  --no-browser \
   --port "$PORT" \
   --ServerApp.ip=127.0.0.1 \
   --ServerApp.token='' \
   --ServerApp.password='' \
   --ServerApp.open_browser=False \
+  --ExtensionApp.open_browser=False \
   --LabServerApp.open_browser=False \
   --ServerApp.root_dir "$WORKSPACE"

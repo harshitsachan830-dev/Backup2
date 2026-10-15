@@ -353,23 +353,7 @@ try {
     console.log(` Local API URL:              ${apiUrl}`);
     console.log(" Keep this window open while working with notebooks.");
     console.log("=======================================================\n");
-
-    if (process.platform === "darwin") {
-      try {
-        spawn("open", [launchUrl], { stdio: "ignore", detached: true }).unref();
-      } catch {
-        // Non-fatal if browser cannot be spawned
-      }
-    } else if (process.platform === "win32") {
-      try {
-        spawn("cmd.exe", ["/c", "start", "", launchUrl], {
-          stdio: "ignore",
-          detached: true,
-        }).unref();
-      } catch {
-        // Non-fatal if browser cannot be spawned
-      }
-    }
+    console.log(" Navigate to the ModelMind dashboard and click 'Open Notebook' to work with notebooks.\n");
   }
 } catch (error) {
   console.error("Could not start the local ModelMind services:", error);

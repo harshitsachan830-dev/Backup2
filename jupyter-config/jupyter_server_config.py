@@ -19,3 +19,5 @@ c.Branding.short_name = "ModelMind Notebook"
 c.ServerApp.token = ""
 c.ServerApp.password = ""
 c.ServerApp.open_browser = False
+c.ExtensionApp.open_browser = False
+c.LabServerApp.open_browser = False
