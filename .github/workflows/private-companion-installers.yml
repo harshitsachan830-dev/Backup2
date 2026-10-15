@@ -1,6 +1,6 @@
 name: Build private companion installers
 
-on:
+'on':
   workflow_dispatch:
   push:
     tags:
@@ -95,6 +95,27 @@ jobs:
           path: release-assets
           pattern: ModelMind-Setup-*
           merge-multiple: true
+      - name: Create release notes
+        run: |
+          cat << 'EOF' > release-notes.md
+          ## ModelMind Install Guide
+
+          ### macOS (DMG)
+          1. Download **ModelMind-Setup-macOS-arm64.dmg** (Apple Silicon M1/M2/M3/M4) or **ModelMind-Setup-macOS-x64.dmg** (Intel).
+          2. Open the `.dmg` file.
+          3. **Drag ModelMind into the Applications folder**.
+          4. Open Applications and double-click **ModelMind**.
+          5. If macOS shows an unverified developer dialog, right-click **ModelMind -> Open** (or go to **System Settings -> Privacy & Security -> Open Anyway**).
+
+          ### Windows
+          1. Download **ModelMind-Setup-Windows-x64.exe**.
+          2. Double-click to install.
+          3. If SmartScreen shows a warning, click **More info -> Run anyway**.
+
+          ### Setup
+          - The dashboard opens in your browser automatically.
+          - In the notebook, paste your Gemini API key in the API Key sidebar tab.
+          EOF
       - name: Create private prerelease
         env:
           GH_TOKEN: ${{ github.token }}
@@ -103,29 +124,4 @@ jobs:
             --repo "$GITHUB_REPOSITORY" \
             --prerelease \
             --title "ModelMind $GITHUB_REF_NAME" \
-            --notes "$(cat <<'EOF'
-## ModelMind — Install Guide
-
-### macOS
-1. Download **ModelMind-Setup-macOS-arm64.dmg** (Apple Silicon M1/M2/M3/M4) or **ModelMind-Setup-macOS-x64.dmg** (Intel Mac).
-2. Open the `.dmg` file — a window opens with the ModelMind icon and an Applications shortcut.
-3. **Drag ModelMind into the Applications folder**.
-4. Eject the DMG.
-5. Open Launchpad or Applications and **double-click ModelMind**.
-6. macOS will ask: *"ModelMind is an app downloaded from the internet. Are you sure?"* — click **Open**.
-7. A Terminal window starts the local services. Keep it open while using ModelMind.
-
-### Windows
-1. Download **ModelMind-Setup-Windows-x64.exe**.
-2. Double-click it to install.
-3. If SmartScreen shows a warning, click **More info → Run anyway**.
-
-### First Launch
-- The ModelMind dashboard opens in your browser automatically.
-- To use the AI chatbot, go to the **API Key** tab in the right sidebar and paste your Gemini API key from [aistudio.google.com](https://aistudio.google.com).
-- Ollama (optional local AI) can be installed from [ollama.com](https://ollama.com).
-
----
-*Unsigned prototype — for testing only. Do not distribute publicly.*
-EOF
-)"
+            --notes-file release-notes.md
