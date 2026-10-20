@@ -47,7 +47,13 @@ echo "[3/5] Project downloaded ✓"
 
 # ---- Step 4: Create .env.local ----
 echo "[4/5] Setting up environment variables..."
-cat > "$INSTALL_DIR/.env.local" << 'EOF'
+if [ -f "$INSTALL_DIR/.env.local" ]; then
+    echo "[4/5] .env.local already exists, preserving your configuration ✓"
+elif [ -f "$HOME/ML plateform/modelmind-source/.env.local" ]; then
+    cp "$HOME/ML plateform/modelmind-source/.env.local" "$INSTALL_DIR/.env.local"
+    echo "[4/5] .env.local automatically imported from local setup ✓"
+else
+    cat > "$INSTALL_DIR/.env.local" << 'EOF'
 NEXT_PUBLIC_SUPABASE_URL=PASTE_YOUR_VALUE_HERE
 NEXT_PUBLIC_SUPABASE_ANON_KEY=PASTE_YOUR_VALUE_HERE
 BREVO_API_KEY=PASTE_YOUR_VALUE_HERE
@@ -59,23 +65,38 @@ SUPABASE_URL=PASTE_YOUR_VALUE_HERE
 SUPABASE_SERVICE_ROLE_KEY=PASTE_YOUR_VALUE_HERE
 MODELMIND_ADMIN_EMAILS=PASTE_YOUR_VALUE_HERE
 EOF
-echo ""
-echo "==> IMPORTANT: Open $INSTALL_DIR/.env.local and paste your real API keys before running the app!"
-echo "    (Get keys from Harshit or your .env.local backup)"
-echo "[4/5] .env.local template created ✓"
+    echo ""
+    echo "==> IMPORTANT: Open $INSTALL_DIR/.env.local and paste your real API keys before running the app!"
+    echo "    (Get keys from Harshit or your .env.local backup)"
+    echo "[4/5] .env.local template created ✓"
+fi
 
 # ---- Step 5: Install npm packages ----
-echo "[5/5] Installing packages (1-2 minutes)..."
+echo "[5/5] Installing packages..."
 cd "$INSTALL_DIR"
 npm install --legacy-peer-deps
 echo "[5/5] Packages installed ✓"
 
 echo ""
 echo "============================================"
-echo "   Setup Complete! Launching ModelMind...  "
+echo "   Setup Complete! Starting ModelMind...   "
 echo "============================================"
 echo ""
-echo "Opening http://localhost:3000 ..."
-open http://localhost:3000 &
-sleep 3
+echo "Starting local Next.js server on port 3000..."
+echo "Browser will open automatically once the server is ready."
+echo "Press Ctrl+C in this terminal when you want to stop the server."
+echo ""
+
+# Background loop to open browser once port 3000 is listening
+(
+  for i in {1..40}; do
+    if curl -s -o /dev/null -w "%{http_code}" http://localhost:3000 2>/dev/null | grep -E "(200|302|307|308)" >/dev/null; then
+      sleep 1
+      open http://localhost:3000
+      break
+    fi
+    sleep 1
+  done
+) &
+
 npm run dev
