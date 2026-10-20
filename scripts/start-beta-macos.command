@@ -3,7 +3,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 APP_DIR="$ROOT_DIR/modelmind-source"
-WEB_ORIGIN="http://localhost:3000"
+WEB_ORIGIN="https://modelmind-staging.onrender.com"
 PACKAGED_NODE="$ROOT_DIR/runtime/node/bin/node"
 PACKAGED_PYTHON="$ROOT_DIR/runtime/python/bin/python3.12"
 USER_DATA_DIR="$HOME/Library/Application Support/ModelMind"

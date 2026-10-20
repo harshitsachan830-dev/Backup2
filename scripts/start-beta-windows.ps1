@@ -2,7 +2,7 @@ $ErrorActionPreference = "Stop"
 
 $root = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $appDirectory = Join-Path $root "modelmind-source"
-$websiteOrigin = "http://localhost:3000"
+$websiteOrigin = "https://modelmind-staging.onrender.com"
 $packagedNode = Join-Path $root "runtime\node\node.exe"
 $packagedPython = Join-Path $root "runtime\python\python.exe"
 $userDataDirectory = Join-Path $env:LOCALAPPDATA "ModelMind"

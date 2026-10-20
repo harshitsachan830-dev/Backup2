@@ -82,21 +82,14 @@ echo "============================================"
 echo "   Setup Complete! Starting ModelMind...   "
 echo "============================================"
 echo ""
-echo "Starting local Next.js server on port 3000..."
-echo "Browser will open automatically once the server is ready."
-echo "Press Ctrl+C in this terminal when you want to stop the server."
+echo "Opening ModelMind in your browser..."
+echo "Starting local JupyterLab notebook companion..."
+echo "Keep this terminal window open while using ModelMind."
+echo "Press Ctrl+C to stop."
 echo ""
 
-# Background loop to open browser once port 3000 is listening
-(
-  for i in {1..40}; do
-    if curl -s -o /dev/null -w "%{http_code}" http://localhost:3000 2>/dev/null | grep -E "(200|302|307|308)" >/dev/null; then
-      sleep 1
-      open http://localhost:3000
-      break
-    fi
-    sleep 1
-  done
-) &
+# Open the Render-hosted web app immediately
+open "https://modelmind-staging.onrender.com" 2>/dev/null || true
 
-npm run dev
+# Run local JupyterLab companion
+npm run companion

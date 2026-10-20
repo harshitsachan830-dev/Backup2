@@ -92,22 +92,15 @@ Write-Host "============================================" -ForegroundColor Cyan
 Write-Host "   Setup Complete! Starting ModelMind...   " -ForegroundColor Cyan
 Write-Host "============================================" -ForegroundColor Cyan
 Write-Host ""
-Write-Host "Starting local Next.js server on port 3000..." -ForegroundColor White
-Write-Host "Once server is ready, opening browser at http://localhost:3000 ..." -ForegroundColor Yellow
-Write-Host "Press Ctrl+C when you want to stop the server." -ForegroundColor Gray
+Write-Host "Opening ModelMind in your browser..." -ForegroundColor Green
+Write-Host "Starting local JupyterLab notebook companion..." -ForegroundColor Yellow
+Write-Host "Keep this window open while using ModelMind." -ForegroundColor Gray
+Write-Host "Press Ctrl+C to stop." -ForegroundColor Gray
 Write-Host ""
 
-Start-Job -ScriptBlock {
-    for ($i = 0; $i -lt 40; $i++) {
-        Start-Sleep -Seconds 1
-        try {
-            $resp = Invoke-WebRequest -Uri "http://localhost:3000" -UseBasicParsing -TimeoutSec 1
-            if ($resp.StatusCode -ge 200 -and $resp.StatusCode -lt 400) {
-                Start-Process "http://localhost:3000"
-                break
-            }
-        } catch {}
-    }
-} | Out-Null
+# Open the Render-hosted web app in browser
+Start-Process "https://modelmind-staging.onrender.com"
 
-npm run dev
+# Run local JupyterLab companion
+npm run companion
+
