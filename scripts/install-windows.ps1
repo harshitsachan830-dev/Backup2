@@ -1,106 +1,97 @@
-# ==============================================================================
-# ModelMind — Windows One-Line Zero-Prompt Installer
-# ==============================================================================
-# Usage (run in PowerShell as regular user - NO Admin required):
-#   irm https://raw.githubusercontent.com/harshitsachan830-dev/Backup2/main/scripts/install-windows.ps1 | iex
-#
-# What this script does:
-#   1. Verifies 64-bit Windows
-#   2. Downloads the official ModelMind Windows installer directly from GitHub
-#   3. Removes Windows Mark-of-the-Web (Unblock-File) to bypass SmartScreen warnings
-#   4. Installs ModelMind quietly to %LOCALAPPDATA%\Programs\ModelMind (no admin needed)
-#   5. Creates Start Menu and Desktop shortcuts with custom ModelMind icon
-#   6. Launches ModelMind immediately
-# ==============================================================================
+# ============================================================
+# ModelMind — Windows Auto Installer
+# Usage: irm https://raw.githubusercontent.com/harshitsachan830-dev/Backup2/main/scripts/install-windows.ps1 | iex
+# ============================================================
 
 $ErrorActionPreference = "Stop"
 
-$repo = "harshitsachan830-dev/Backup2"
-$appName = "ModelMind"
-$assetName = "ModelMind-Setup-Windows-x64.exe"
-
 Write-Host ""
-Write-Host "============================================================" -ForegroundColor Cyan
-Write-Host "            ModelMind Automated Windows Installer           " -ForegroundColor Cyan
-Write-Host "============================================================" -ForegroundColor Cyan
+Write-Host "============================================" -ForegroundColor Cyan
+Write-Host "   ModelMind - Auto Installer for Windows  " -ForegroundColor Cyan
+Write-Host "============================================" -ForegroundColor Cyan
 Write-Host ""
 
-# 1. Architecture check
-if (-not [System.Environment]::Is64BitOperatingSystem) {
-    Write-Error "ModelMind requires a 64-bit version of Windows."
-    exit 1
-}
-Write-Host "-> System Architecture: 64-bit Windows detected" -ForegroundColor Green
-
-# 2. Get latest release
-Write-Host "-> Fetching latest release info from GitHub... " -NoNewline
-$latestTag = "private-companion-v0.2.2"
-try {
-    $releaseData = Invoke-RestMethod -Uri "https://api.github.com/repos/$repo/releases" -UseBasicParsing -ErrorAction SilentlyContinue
-    if ($releaseData -and $releaseData.Count -gt 0) {
-        $latestTag = $releaseData[0].tag_name
-    }
-} catch {
-    # fallback to default
-}
-Write-Host $latestTag -ForegroundColor Green
-
-$downloadUrl = "https://github.com/$repo/releases/download/$latestTag/$assetName"
-$tempDir = Join-Path $env:TEMP "ModelMind-Install-$(Get-Random)"
-New-Item -ItemType Directory -Path $tempDir -Force | Out-Null
-$installerPath = Join-Path $tempDir $assetName
-
-# 3. Download installer
-Write-Host "-> Downloading $appName ($assetName)..."
-try {
-    [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.SecurityProtocolType]::Tls12 -bor [System.Net.SecurityProtocolType]::Tls13
-    (New-Object System.Net.WebClient).DownloadFile($downloadUrl, $installerPath)
-} catch {
-    Invoke-WebRequest -Uri $downloadUrl -OutFile $installerPath -UseBasicParsing
+# ---- Helper: Check if command exists ----
+function CommandExists($cmd) {
+    return $null -ne (Get-Command $cmd -ErrorAction SilentlyContinue)
 }
 
-if (-not (Test-Path $installerPath)) {
-    Write-Error "Failed to download installer from $downloadUrl"
-    exit 1
-}
-
-# 4. Remove Windows Mark-of-the-Web (bypasses SmartScreen untrusted download warning)
-Write-Host "-> Removing security download restrictions (Unblock-File)... " -NoNewline
-Unblock-File -Path $installerPath -ErrorAction SilentlyContinue
-Write-Host "Unrestricted" -ForegroundColor Green
-
-# 5. Run Inno Setup installer silently to local app data (no elevation required)
-Write-Host "-> Installing ModelMind... " -NoNewline
-$installProcess = Start-Process -FilePath $installerPath -ArgumentList "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP-" -PassThru -Wait
-if ($installProcess.ExitCode -ne 0) {
-    Write-Host "Running with standard UI..." -ForegroundColor Yellow
-    Start-Process -FilePath $installerPath -Wait
+# ---- Step 1: Install Node.js if missing ----
+if (-not (CommandExists "node")) {
+    Write-Host "[1/5] Node.js not found. Downloading and installing Node.js..." -ForegroundColor Yellow
+    $nodeInstaller = "$env:TEMP\node-installer.msi"
+    Invoke-WebRequest "https://nodejs.org/dist/v20.11.0/node-v20.11.0-x64.msi" -OutFile $nodeInstaller
+    Start-Process msiexec.exe -ArgumentList "/i `"$nodeInstaller`" /quiet /norestart" -Wait
+    $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
+    Write-Host "[1/5] Node.js installed successfully!" -ForegroundColor Green
 } else {
-    Write-Host "Installed" -ForegroundColor Green
+    $nodeVer = node --version
+    Write-Host "[1/5] Node.js already installed ($nodeVer) ✓" -ForegroundColor Green
 }
 
-# Clean up temp installer
-Remove-Item -LiteralPath $tempDir -Recurse -Force -ErrorAction SilentlyContinue
+# ---- Step 2: Install Git if missing ----
+if (-not (CommandExists "git")) {
+    Write-Host "[2/5] Git not found. Downloading and installing Git..." -ForegroundColor Yellow
+    $gitInstaller = "$env:TEMP\git-installer.exe"
+    Invoke-WebRequest "https://github.com/git-for-windows/git/releases/download/v2.44.0.windows.1/Git-2.44.0-64-bit.exe" -OutFile $gitInstaller
+    Start-Process $gitInstaller -ArgumentList "/VERYSILENT /NORESTART" -Wait
+    $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
+    Write-Host "[2/5] Git installed successfully!" -ForegroundColor Green
+} else {
+    $gitVer = git --version
+    Write-Host "[2/5] Git already installed ($gitVer) ✓" -ForegroundColor Green
+}
 
-# 6. Unblock installed program files
-$installDir = Join-Path $env:LOCALAPPDATA "Programs\ModelMind"
+# ---- Step 3: Clone the repo ----
+$installDir = "$env:USERPROFILE\ModelMind"
+Write-Host "[3/5] Cloning ModelMind into $installDir ..." -ForegroundColor Yellow
+
 if (Test-Path $installDir) {
-    Get-ChildItem -Path $installDir -Recurse -ErrorAction SilentlyContinue | Unblock-File -ErrorAction SilentlyContinue
-}
-
-# 7. Success & Launch
-$launcherPath = Join-Path $installDir "scripts\start-beta-windows.cmd"
-Write-Host ""
-Write-Host "============================================================" -ForegroundColor Green
-Write-Host "  ModelMind successfully installed with zero security alerts! " -ForegroundColor Green
-Write-Host "============================================================" -ForegroundColor Green
-Write-Host ""
-Write-Host "Shortcuts created on Desktop and Start Menu." -ForegroundColor Cyan
-Write-Host "Starting ModelMind now..." -ForegroundColor Cyan
-Write-Host ""
-
-if (Test-Path $launcherPath) {
-    Start-Process -FilePath $launcherPath
+    Write-Host "      Folder already exists. Pulling latest changes..." -ForegroundColor Yellow
+    Set-Location $installDir
+    git pull origin master
 } else {
-    Write-Host "You can start ModelMind anytime from your Desktop or Start Menu." -ForegroundColor Yellow
+    git clone https://github.com/divyanshmaheshwari617-cell/ModelMind.git $installDir
+    Set-Location $installDir
 }
+Write-Host "[3/5] Project downloaded successfully!" -ForegroundColor Green
+
+# ---- Step 4: Create .env.local ----
+Write-Host "[4/5] Setting up environment variables..." -ForegroundColor Yellow
+$envContent = @"
+NEXT_PUBLIC_SUPABASE_URL=PASTE_YOUR_VALUE_HERE
+NEXT_PUBLIC_SUPABASE_ANON_KEY=PASTE_YOUR_VALUE_HERE
+BREVO_API_KEY=PASTE_YOUR_VALUE_HERE
+BREVO_SENDER_EMAIL=PASTE_YOUR_VALUE_HERE
+MONGODB_URI=PASTE_YOUR_VALUE_HERE
+MONGODB_DB=modelmind
+OTP_HASH_SECRET=PASTE_YOUR_VALUE_HERE
+SUPABASE_URL=PASTE_YOUR_VALUE_HERE
+SUPABASE_SERVICE_ROLE_KEY=PASTE_YOUR_VALUE_HERE
+MODELMIND_ADMIN_EMAILS=PASTE_YOUR_VALUE_HERE
+"@
+$envContent | Out-File -FilePath "$installDir\.env.local" -Encoding utf8 -Force
+Write-Host ""
+Write-Host "==> IMPORTANT: Open $installDir\.env.local in Notepad and paste your real API keys!" -ForegroundColor Red
+Write-Host "    (Get keys from Harshit or your .env.local backup)" -ForegroundColor Yellow
+Write-Host "[4/5] .env.local template created (fill in keys before running app) ✓" -ForegroundColor Green
+
+# ---- Step 5: Install npm packages ----
+Write-Host "[5/5] Installing packages (this may take 1-2 minutes)..." -ForegroundColor Yellow
+Set-Location $installDir
+npm install --legacy-peer-deps
+Write-Host "[5/5] All packages installed ✓" -ForegroundColor Green
+
+# ---- Launch ----
+Write-Host ""
+Write-Host "============================================" -ForegroundColor Cyan
+Write-Host "   Setup Complete! Launching ModelMind...  " -ForegroundColor Cyan
+Write-Host "============================================" -ForegroundColor Cyan
+Write-Host ""
+Write-Host "Opening browser at http://localhost:3000 ..." -ForegroundColor White
+Write-Host "Press Ctrl+C to stop the server." -ForegroundColor Gray
+Write-Host ""
+
+Start-Process "http://localhost:3000"
+Start-Sleep -Seconds 3
+npm run dev
