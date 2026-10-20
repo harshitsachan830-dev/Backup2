@@ -12,84 +12,155 @@ echo "   ModelMind - Auto Installer for Mac      "
 echo "============================================"
 echo ""
 
+INSTALL_DIR="$HOME/ModelMind"
+# run-local.mjs looks ONE level above INSTALL_DIR for:
+#   scripts/start-platform.sh  →  ~/scripts/start-platform.sh
+#   .venv/bin/python           →  ~/.venv/bin/python
+PARENT_DIR="$HOME"
+VENV_DIR="$PARENT_DIR/.venv"
+PLATFORM_SCRIPT="$PARENT_DIR/scripts/start-platform.sh"
+
 # ---- Step 1: Install Node.js if missing ----
 if ! command -v node &> /dev/null; then
-    echo "[1/5] Node.js not found. Installing via Homebrew..."
+    echo "[1/6] Node.js not found. Installing via Homebrew..."
     if ! command -v brew &> /dev/null; then
         /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
     fi
     brew install node
-    echo "[1/5] Node.js installed ✓"
+    echo "[1/6] Node.js installed ✓"
 else
-    echo "[1/5] Node.js $(node --version) already installed ✓"
+    echo "[1/6] Node.js $(node --version) already installed ✓"
 fi
 
 # ---- Step 2: Install Git if missing ----
 if ! command -v git &> /dev/null; then
-    echo "[2/5] Git not found. Installing..."
+    echo "[2/6] Git not found. Installing..."
     brew install git
-    echo "[2/5] Git installed ✓"
+    echo "[2/6] Git installed ✓"
 else
-    echo "[2/5] Git $(git --version) already installed ✓"
+    echo "[2/6] Git $(git --version) already installed ✓"
 fi
 
-# ---- Step 3: Clone the repo ----
-INSTALL_DIR="$HOME/ModelMind"
-echo "[3/5] Cloning ModelMind into $INSTALL_DIR ..."
+# ---- Step 3: Install Python 3 if missing ----
+PYTHON_BIN=""
+if command -v python3 &> /dev/null && python3 -c 'import sys; sys.exit(0 if sys.version_info >= (3,10) else 1)' 2>/dev/null; then
+    PYTHON_BIN="python3"
+    echo "[3/6] Python $(python3 --version) already installed ✓"
+elif ! command -v brew &> /dev/null; then
+    /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+    brew install python@3.12
+    PYTHON_BIN="python3"
+    echo "[3/6] Python installed via Homebrew ✓"
+else
+    echo "[3/6] Python 3.10+ not found. Installing via Homebrew..."
+    brew install python@3.12
+    PYTHON_BIN="python3"
+    echo "[3/6] Python installed ✓"
+fi
+
+# ---- Step 4: Clone ModelMind companion app ----
+echo "[4/6] Cloning ModelMind into $INSTALL_DIR ..."
 if [ -d "$INSTALL_DIR" ]; then
     echo "      Folder exists. Pulling latest..."
-    cd "$INSTALL_DIR" && git pull origin master
+    cd "$INSTALL_DIR" && git pull origin master 2>/dev/null || true
 else
     git clone https://github.com/divyanshmaheshwari617-cell/ModelMind.git "$INSTALL_DIR"
     cd "$INSTALL_DIR"
 fi
-echo "[3/5] Project downloaded ✓"
+echo "[4/6] Project downloaded ✓"
 
-# ---- Step 4: Create .env.local ----
-echo "[4/5] Setting up environment variables..."
+# ---- Create .env.local ----
 if [ -f "$INSTALL_DIR/.env.local" ]; then
-    echo "[4/5] .env.local already exists, preserving your configuration ✓"
+    echo "      .env.local already exists ✓"
 elif [ -f "$HOME/ML plateform/modelmind-source/.env.local" ]; then
     cp "$HOME/ML plateform/modelmind-source/.env.local" "$INSTALL_DIR/.env.local"
-    echo "[4/5] .env.local automatically imported from local setup ✓"
-else
-    cat > "$INSTALL_DIR/.env.local" << 'EOF'
-NEXT_PUBLIC_SUPABASE_URL=PASTE_YOUR_VALUE_HERE
-NEXT_PUBLIC_SUPABASE_ANON_KEY=PASTE_YOUR_VALUE_HERE
-BREVO_API_KEY=PASTE_YOUR_VALUE_HERE
-BREVO_SENDER_EMAIL=PASTE_YOUR_VALUE_HERE
-MONGODB_URI=PASTE_YOUR_VALUE_HERE
-MONGODB_DB=modelmind
-OTP_HASH_SECRET=PASTE_YOUR_VALUE_HERE
-SUPABASE_URL=PASTE_YOUR_VALUE_HERE
-SUPABASE_SERVICE_ROLE_KEY=PASTE_YOUR_VALUE_HERE
-MODELMIND_ADMIN_EMAILS=PASTE_YOUR_VALUE_HERE
-EOF
-    echo ""
-    echo "==> IMPORTANT: Open $INSTALL_DIR/.env.local and paste your real API keys before running the app!"
-    echo "    (Get keys from Harshit or your .env.local backup)"
-    echo "[4/5] .env.local template created ✓"
+    echo "      .env.local auto-imported ✓"
 fi
 
 # ---- Step 5: Install npm packages ----
-echo "[5/5] Installing packages..."
+echo "[5/6] Installing Node.js packages..."
 cd "$INSTALL_DIR"
-npm install --legacy-peer-deps
-echo "[5/5] Packages installed ✓"
+npm install --legacy-peer-deps --silent
+echo "[5/6] Node.js packages installed ✓"
+
+# ---- Step 6: Set up JupyterLab Python environment ----
+echo "[6/6] Setting up JupyterLab Python environment..."
+
+mkdir -p "$PLATFORM_DIR/scripts"
+
+# Create the Python venv if it doesn't exist
+if [ ! -f "$VENV_DIR/bin/python" ]; then
+    echo "      Creating Python virtual environment..."
+    $PYTHON_BIN -m venv "$VENV_DIR"
+fi
+
+# Install JupyterLab + required packages into the venv
+echo "      Installing JupyterLab and ML packages (this may take 2-3 minutes first time)..."
+"$VENV_DIR/bin/pip" install --quiet --upgrade pip
+"$VENV_DIR/bin/pip" install --quiet \
+    jupyterlab \
+    notebook \
+    numpy \
+    pandas \
+    scikit-learn \
+    matplotlib \
+    seaborn \
+    requests 2>/dev/null || \
+"$VENV_DIR/bin/pip" install \
+    jupyterlab \
+    numpy \
+    pandas \
+    scikit-learn \
+    matplotlib \
+    requests
+
+echo "[6/6] JupyterLab environment ready ✓"
+
+# ---- Create ~/scripts/start-platform.sh (run-local.mjs looks here) ----
+mkdir -p "$PARENT_DIR/scripts"
+cat > "$PLATFORM_SCRIPT" << PLATFORM_EOF
+#!/bin/bash
+# ModelMind JupyterLab Launcher (auto-generated by installer)
+VENV_DIR="$VENV_DIR"
+JUPYTER_PORT="\${MODELMIND_JUPYTER_PORT:-8899}"
+NOTEBOOK_DIR="\$HOME/ModelMind Notebooks"
+
+mkdir -p "\$NOTEBOOK_DIR"
+
+if [ ! -f "\$VENV_DIR/bin/jupyter" ]; then
+    echo "JupyterLab not found. Re-run the ModelMind installer."
+    exit 1
+fi
+
+exec "\$VENV_DIR/bin/jupyter" lab \\
+    --no-browser \\
+    --port="\$JUPYTER_PORT" \\
+    --ip=127.0.0.1 \\
+    --ServerApp.token='' \\
+    --ServerApp.password='' \\
+    --ServerApp.allow_origin='*' \\
+    --ServerApp.disable_check_xsrf=True \\
+    --notebook-dir="\$NOTEBOOK_DIR"
+PLATFORM_EOF
+
+chmod +x "$PLATFORM_SCRIPT"
+echo "      JupyterLab launcher created at $PLATFORM_SCRIPT ✓"
 
 echo ""
 echo "============================================"
 echo "   Setup Complete! Starting ModelMind...   "
 echo "============================================"
 echo ""
-echo "Opening ModelMind in your browser..."
-echo "Starting local JupyterLab notebook companion..."
-echo "Keep this terminal window open while using ModelMind."
-echo "Press Ctrl+C to stop."
+echo "✓ Browser opening → ModelMind at Render"
+echo "✓ JupyterLab starting locally on port 8899"
+echo "✓ Keep this terminal open while using ModelMind"
+echo "  Press Ctrl+C to stop."
 echo ""
 
-# Open the Render-hosted web app immediately
+# Open the Render-hosted web app
 open "https://modelmind-staging.onrender.com" 2>/dev/null || true
 
 # Run local JupyterLab companion
-npm run companion
+# INSTALL_DIR is ~/ModelMind — companion looks one level up (~/) for scripts/ and .venv
+cd "$INSTALL_DIR"
+MODELMIND_WEB_ORIGINS="https://modelmind-staging.onrender.com" npm run companion
