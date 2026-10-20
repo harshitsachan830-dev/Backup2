@@ -2,8 +2,8 @@
 
 import { useState } from "react";
 
-import OpenJupyterForm from "@/components/notebook/OpenJupyterForm";
 import ProjectsWorkspace from "@/components/projects/ProjectsWorkspace";
+import OpenJupyterForm from "@/components/notebook/OpenJupyterForm";
 import { visualizations } from "@/lib/visualizations";
 import type { Workspace } from "./Sidebar";
 
@@ -512,7 +512,7 @@ function DashboardHome({
         <div className="homeContentCard homeExploreCard">
           <HomeSectionHeading icon="▥" title="Explore visualizations" description="Interactive visualizations for popular machine-learning algorithms." action="View all" onClick={() => onWorkspaceChange("Visualizations")} />
           <div className="homeVisualizationGrid">
-            {visualizations.filter((item) => item.href !== null).slice(0, 4).map((item) => (
+            {visualizations.filter((item): item is typeof item & { href: string } => Boolean(item.href)).slice(0, 4).map((item) => (
               <ExternalLink className="homeVisualizationTile" href={item.href} key={item.name}>
                 <strong>{item.name}</strong>
                 <VisualizationIllustration kind={item.kind} />
