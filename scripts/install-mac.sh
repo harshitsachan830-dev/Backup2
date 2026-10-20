@@ -86,7 +86,7 @@ echo "[5/6] Node.js packages installed ✓"
 # ---- Step 6: Set up JupyterLab Python environment ----
 echo "[6/6] Setting up JupyterLab Python environment..."
 
-mkdir -p "$PLATFORM_DIR/scripts"
+mkdir -p "$PARENT_DIR/scripts"
 
 # Create the Python venv if it doesn't exist
 if [ ! -f "$VENV_DIR/bin/python" ]; then
