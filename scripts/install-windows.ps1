@@ -109,7 +109,24 @@ if (Test-Path $installDir) {
             Invoke-WebRequest -Uri "https://raw.githubusercontent.com/harshitsachan830-dev/Backup2/main/scripts/start-beta-windows.ps1" -OutFile (Join-Path $scriptsDir "start-beta-windows.ps1") -UseBasicParsing -ErrorAction SilentlyContinue
         }
 
-        # Ensure custom ModelMind labextension is active in venv
+        $jupyterCfgDir = Join-Path $installDir "jupyter-config"
+        if (Test-Path $jupyterCfgDir) {
+            Invoke-WebRequest -Uri "https://raw.githubusercontent.com/harshitsachan830-dev/Backup2/main/jupyter-config/jupyter_server_config.py" -OutFile (Join-Path $jupyterCfgDir "jupyter_server_config.py") -UseBasicParsing -ErrorAction SilentlyContinue
+        }
+
+        $runLocalPath = Join-Path $installDir "modelmind-source\scripts\run-local.mjs"
+        if (Test-Path $runLocalPath) {
+            Invoke-WebRequest -Uri "https://raw.githubusercontent.com/harshitsachan830-dev/Backup2/main/modelmind-source/scripts/run-local.mjs" -OutFile $runLocalPath -UseBasicParsing -ErrorAction SilentlyContinue
+        }
+
+        # Pre-seed server extension configuration into APPDATA\jupyter
+        $appDataJupyterConfigD = Join-Path $env:APPDATA "jupyter\jupyter_server_config.d"
+        try {
+            New-Item -ItemType Directory -Path $appDataJupyterConfigD -Force | Out-Null
+            Set-Content -Path (Join-Path $appDataJupyterConfigD "ml_platform_error_assistant.json") -Value '{"ServerApp": {"jpserver_extensions": {"ml_platform_error_assistant": true}}}' -Force
+        } catch { }
+
+        # Ensure custom ModelMind labextension is active in venv if venv already exists
         $venv = Join-Path $env:LOCALAPPDATA "ModelMind\.venv"
         $builtExt = Join-Path $installDir "extensions\error-assistant\ml_platform_error_assistant\labextension"
         $targetExt = Join-Path $venv "share\jupyter\labextensions\@ml-platform\error-assistant"
@@ -117,11 +134,8 @@ if (Test-Path $installDir) {
             New-Item -ItemType Directory -Path $targetExt -Force | Out-Null
             Copy-Item -Path (Join-Path $builtExt "*") -Destination $targetExt -Recurse -Force
             $cfgTarget = Join-Path $venv "etc\jupyter\jupyter_server_config.d"
-            $cfgSrc = Join-Path $installDir "extensions\error-assistant\jupyter-config\server-config\ml_platform_error_assistant.json"
-            if (Test-Path $cfgSrc) {
-                New-Item -ItemType Directory -Path $cfgTarget -Force | Out-Null
-                Copy-Item -LiteralPath $cfgSrc -Destination (Join-Path $cfgTarget "ml_platform_error_assistant.json") -Force
-            }
+            New-Item -ItemType Directory -Path $cfgTarget -Force | Out-Null
+            Set-Content -Path (Join-Path $cfgTarget "ml_platform_error_assistant.json") -Value '{"ServerApp": {"jpserver_extensions": {"ml_platform_error_assistant": true}}}' -Force
         }
     } catch {
         # Non-fatal if offline

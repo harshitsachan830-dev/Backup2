@@ -76,13 +76,16 @@ if ! command -v ollama >/dev/null 2>&1; then
   echo "Model installation remains explicit and must be approved before any pull command."
 fi
 
-exec "$JUPYTER_BIN" lab \
+exec "$PYTHON_BIN" -m jupyterlab \
   --no-browser \
   --port "$PORT" \
   --ServerApp.ip=127.0.0.1 \
   --ServerApp.token='' \
   --ServerApp.password='' \
+  --IdentityProvider.token='' \
+  --IdentityProvider.password='' \
   --ServerApp.open_browser=False \
   --ExtensionApp.open_browser=False \
   --LabServerApp.open_browser=False \
-  --ServerApp.root_dir "$WORKSPACE"
+  --ServerApp.root_dir "$WORKSPACE" \
+  --ServerApp.jpserver_extensions="ml_platform_error_assistant=True"

@@ -22,10 +22,15 @@ const platformScript =
   process.platform === "win32"
     ? resolve(repositoryDirectory, "scripts", "start-platform.ps1")
     : resolve(repositoryDirectory, "scripts", "start-platform.sh");
+const venvDirectory =
+  process.env.MODELMIND_VENV_DIR ||
+  (process.env.MODELMIND_USER_DATA_DIR
+    ? resolve(process.env.MODELMIND_USER_DATA_DIR, ".venv")
+    : resolve(repositoryDirectory, ".venv"));
 const pythonExecutable =
   process.platform === "win32"
-    ? resolve(repositoryDirectory, ".venv", "Scripts", "python.exe")
-    : resolve(repositoryDirectory, ".venv", "bin", "python");
+    ? resolve(venvDirectory, "Scripts", "python.exe")
+    : resolve(venvDirectory, "bin", "python");
 const mode = process.argv[2] ?? "dev";
 const runWebsite = mode !== "companion";
 
