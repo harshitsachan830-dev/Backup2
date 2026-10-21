@@ -87,17 +87,18 @@ $installDir = Join-Path $env:LOCALAPPDATA "Programs\ModelMind"
 if (Test-Path $installDir) {
     Get-ChildItem -Path $installDir -Recurse -ErrorAction SilentlyContinue | Unblock-File -ErrorAction SilentlyContinue
 
-    # Pre-create ModelMind Notebooks directory so JupyterLab never encounters missing path
-    $docs = [Environment]::GetFolderPath("MyDocuments")
-    if (-not $docs -or -not (Test-Path -LiteralPath $docs)) {
-        $docs = Join-Path $env:USERPROFILE "Documents"
-    }
-    if (-not (Test-Path -LiteralPath $docs)) {
-        $docs = $env:USERPROFILE
-    }
-    $notebooksDir = Join-Path $docs "ModelMind Notebooks"
-    if (-not (Test-Path -LiteralPath $notebooksDir)) {
-        [System.IO.Directory]::CreateDirectory($notebooksDir) | Out-Null
+    # Pre-create ModelMind Notebooks directory in user profile (same as macOS ~/ModelMind Notebooks)
+    $homeDir = if ($env:USERPROFILE) { $env:USERPROFILE } else { $HOME }
+    $notebooksDir = Join-Path $homeDir "ModelMind Notebooks"
+    try {
+        if (-not (Test-Path -LiteralPath $notebooksDir)) {
+            [System.IO.Directory]::CreateDirectory($notebooksDir) | Out-Null
+        }
+    } catch {
+        $notebooksDir = Join-Path $env:LOCALAPPDATA "ModelMind\Notebooks"
+        try {
+            [System.IO.Directory]::CreateDirectory($notebooksDir) | Out-Null
+        } catch { }
     }
 
     # Update scripts with latest verified fixes

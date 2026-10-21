@@ -6,14 +6,8 @@ $websiteOrigin = "https://modelmind-staging.onrender.com"
 $packagedNode = Join-Path $root "runtime\node\node.exe"
 $packagedPython = Join-Path $root "runtime\python\python.exe"
 $userDataDirectory = Join-Path $env:LOCALAPPDATA "ModelMind"
-$docs = [Environment]::GetFolderPath("MyDocuments")
-if (-not $docs -or -not (Test-Path -LiteralPath $docs)) {
-    $docs = Join-Path $env:USERPROFILE "Documents"
-}
-if (-not (Test-Path -LiteralPath $docs)) {
-    $docs = $env:USERPROFILE
-}
-$workspaceDirectory = Join-Path $docs "ModelMind Notebooks"
+$homeDir = if ($env:USERPROFILE) { $env:USERPROFILE } else { $HOME }
+$workspaceDirectory = Join-Path $homeDir "ModelMind Notebooks"
 $jupyterRuntimeDirectory = Join-Path $userDataDirectory "jupyter\runtime"
 
 if (Test-Path $packagedNode) {
@@ -54,8 +48,12 @@ if (-not (Test-Path (Join-Path $appDirectory "scripts\run-local.mjs"))) {
 }
 
 foreach ($dir in @($userDataDirectory, $workspaceDirectory, $jupyterRuntimeDirectory)) {
-    if (-not (Test-Path -LiteralPath $dir)) {
-        [System.IO.Directory]::CreateDirectory($dir) | Out-Null
+    try {
+        if (-not (Test-Path -LiteralPath $dir)) {
+            [System.IO.Directory]::CreateDirectory($dir) | Out-Null
+        }
+    } catch {
+        # Non-fatal if creation fails
     }
 }
 
