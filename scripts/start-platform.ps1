@@ -33,6 +33,20 @@ if ($env:JUPYTER_CONFIG_PATH) {
     $env:JUPYTER_CONFIG_PATH = $configPath
 }
 
+$errorAssistantDir = Join-Path $root "extensions\error-assistant"
+if ($env:PYTHONPATH) {
+    $env:PYTHONPATH = "$errorAssistantDir;$env:PYTHONPATH"
+} else {
+    $env:PYTHONPATH = $errorAssistantDir
+}
+
+$appDataJupyter = Join-Path $env:APPDATA "jupyter"
+if ($env:JUPYTER_PATH) {
+    $env:JUPYTER_PATH = "$appDataJupyter;$env:JUPYTER_PATH"
+} else {
+    $env:JUPYTER_PATH = $appDataJupyter
+}
+
 if ($env:WORKSPACE) {
     $Workspace = $env:WORKSPACE
 }
@@ -105,16 +119,47 @@ if (-not (Test-Path $jupyter) -or -not (Test-Path (Join-Path $extensionLink "pac
         & $python -m pip install --no-build-isolation (Join-Path $root "extensions\error-assistant")
     }
 
-    # Ensure pre-built labextension files are in place in share/jupyter/labextensions
-    if (Test-Path $builtExtensionDir) {
-        New-Item -ItemType Directory -Path $extensionLink -Force | Out-Null
-        Copy-Item -Path (Join-Path $builtExtensionDir "*") -Destination $extensionLink -Recurse -Force
-    }
+}
 
-    # Ensure jupyter_server_config.d is enabled
-    if (Test-Path $serverConfigFile) {
-        New-Item -ItemType Directory -Path $serverConfigDir -Force | Out-Null
-        Copy-Item -LiteralPath $serverConfigFile -Destination (Join-Path $serverConfigDir "ml_platform_error_assistant.json") -Force
+# Ensure pre-built labextension files are in place for ALL Jupyter installations (venv, Anaconda, user profile)
+if (Test-Path $builtExtensionDir) {
+    $locations = @(
+        $extensionLink,
+        (Join-Path $env:APPDATA "jupyter\labextensions\@ml-platform\error-assistant")
+    )
+    try {
+        $condaBase = (& python -c "import sys; print(sys.prefix)" 2>$null)
+        if ($condaBase -and (Test-Path (Join-Path $condaBase "share\jupyter"))) {
+            $locations += (Join-Path $condaBase "share\jupyter\labextensions\@ml-platform\error-assistant")
+        }
+    } catch { }
+
+    foreach ($loc in $locations) {
+        try {
+            New-Item -ItemType Directory -Path $loc -Force | Out-Null
+            Copy-Item -Path (Join-Path $builtExtensionDir "*") -Destination $loc -Recurse -Force
+        } catch { }
+    }
+}
+
+# Ensure jupyter_server_config.d is enabled
+if (Test-Path $serverConfigFile) {
+    $configLocations = @(
+        $serverConfigDir,
+        (Join-Path $env:APPDATA "jupyter\jupyter_server_config.d")
+    )
+    try {
+        $condaBase = (& python -c "import sys; print(sys.prefix)" 2>$null)
+        if ($condaBase -and (Test-Path (Join-Path $condaBase "etc\jupyter"))) {
+            $configLocations += (Join-Path $condaBase "etc\jupyter\jupyter_server_config.d")
+        }
+    } catch { }
+
+    foreach ($cloc in $configLocations) {
+        try {
+            New-Item -ItemType Directory -Path $cloc -Force | Out-Null
+            Copy-Item -LiteralPath $serverConfigFile -Destination (Join-Path $cloc "ml_platform_error_assistant.json") -Force
+        } catch { }
     }
 }
 
