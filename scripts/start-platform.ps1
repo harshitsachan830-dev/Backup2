@@ -36,6 +36,10 @@ if ($env:JUPYTER_CONFIG_PATH) {
 if ($env:WORKSPACE) {
     $Workspace = $env:WORKSPACE
 }
+$Workspace = $Workspace.Trim().Trim('"', "'").TrimEnd('\')
+if (-not (Test-Path -LiteralPath $Workspace)) {
+    [System.IO.Directory]::CreateDirectory($Workspace) | Out-Null
+}
 
 if (Test-Path $envFile) {
     $allowedSettings = @("ML_PLATFORM_CLOUD_FALLBACK", "GEMINI_API_KEY", "GEMINI_MODEL", "MODELMIND_WEB_ORIGINS")
@@ -98,4 +102,4 @@ if (-not (Get-Command ollama -ErrorAction SilentlyContinue)) {
     Write-Host "Model installation remains explicit and must be approved before any pull command."
 }
 
-& $jupyter lab --no-browser --port $Port --ServerApp.ip=127.0.0.1 --ServerApp.token='' --ServerApp.password='' --ServerApp.open_browser=False --ExtensionApp.open_browser=False --LabServerApp.open_browser=False --ServerApp.root_dir $Workspace
+& $jupyter lab --no-browser --port $Port --ServerApp.ip=127.0.0.1 --ServerApp.token='' --ServerApp.password='' --ServerApp.open_browser=False --ExtensionApp.open_browser=False --LabServerApp.open_browser=False "--ServerApp.root_dir=$Workspace"

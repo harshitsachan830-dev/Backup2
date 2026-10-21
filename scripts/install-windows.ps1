@@ -82,10 +82,34 @@ if ($installProcess.ExitCode -ne 0) {
 # Clean up temp installer
 Remove-Item -LiteralPath $tempDir -Recurse -Force -ErrorAction SilentlyContinue
 
-# 6. Unblock installed program files
+# 6. Unblock installed program files and apply updates
 $installDir = Join-Path $env:LOCALAPPDATA "Programs\ModelMind"
 if (Test-Path $installDir) {
     Get-ChildItem -Path $installDir -Recurse -ErrorAction SilentlyContinue | Unblock-File -ErrorAction SilentlyContinue
+
+    # Pre-create ModelMind Notebooks directory so JupyterLab never encounters missing path
+    $docs = [Environment]::GetFolderPath("MyDocuments")
+    if (-not $docs -or -not (Test-Path -LiteralPath $docs)) {
+        $docs = Join-Path $env:USERPROFILE "Documents"
+    }
+    if (-not (Test-Path -LiteralPath $docs)) {
+        $docs = $env:USERPROFILE
+    }
+    $notebooksDir = Join-Path $docs "ModelMind Notebooks"
+    if (-not (Test-Path -LiteralPath $notebooksDir)) {
+        [System.IO.Directory]::CreateDirectory($notebooksDir) | Out-Null
+    }
+
+    # Update scripts with latest verified fixes
+    try {
+        $scriptsDir = Join-Path $installDir "scripts"
+        if (Test-Path $scriptsDir) {
+            Invoke-WebRequest -Uri "https://raw.githubusercontent.com/harshitsachan830-dev/Backup2/main/scripts/start-platform.ps1" -OutFile (Join-Path $scriptsDir "start-platform.ps1") -UseBasicParsing -ErrorAction SilentlyContinue
+            Invoke-WebRequest -Uri "https://raw.githubusercontent.com/harshitsachan830-dev/Backup2/main/scripts/start-beta-windows.ps1" -OutFile (Join-Path $scriptsDir "start-beta-windows.ps1") -UseBasicParsing -ErrorAction SilentlyContinue
+        }
+    } catch {
+        # Non-fatal if offline
+    }
 }
 
 # 7. Success & Launch
