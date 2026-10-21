@@ -101,7 +101,8 @@ if (Test-Path $installDir) {
         } catch { }
     }
 
-        # Update scripts with latest verified fixes
+    # Update scripts with latest verified fixes
+    try {
         $scriptsDir = Join-Path $installDir "scripts"
         if (Test-Path $scriptsDir) {
             Invoke-WebRequest -Uri "https://raw.githubusercontent.com/harshitsachan830-dev/Backup2/main/scripts/start-platform.ps1" -OutFile (Join-Path $scriptsDir "start-platform.ps1") -UseBasicParsing -ErrorAction SilentlyContinue
