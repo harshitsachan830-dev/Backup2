@@ -101,12 +101,26 @@ if (Test-Path $installDir) {
         } catch { }
     }
 
-    # Update scripts with latest verified fixes
-    try {
+        # Update scripts with latest verified fixes
         $scriptsDir = Join-Path $installDir "scripts"
         if (Test-Path $scriptsDir) {
             Invoke-WebRequest -Uri "https://raw.githubusercontent.com/harshitsachan830-dev/Backup2/main/scripts/start-platform.ps1" -OutFile (Join-Path $scriptsDir "start-platform.ps1") -UseBasicParsing -ErrorAction SilentlyContinue
             Invoke-WebRequest -Uri "https://raw.githubusercontent.com/harshitsachan830-dev/Backup2/main/scripts/start-beta-windows.ps1" -OutFile (Join-Path $scriptsDir "start-beta-windows.ps1") -UseBasicParsing -ErrorAction SilentlyContinue
+        }
+
+        # Ensure custom ModelMind labextension is active in venv
+        $venv = Join-Path $env:LOCALAPPDATA "ModelMind\.venv"
+        $builtExt = Join-Path $installDir "extensions\error-assistant\ml_platform_error_assistant\labextension"
+        $targetExt = Join-Path $venv "share\jupyter\labextensions\@ml-platform\error-assistant"
+        if ((Test-Path $venv) -and (Test-Path $builtExt)) {
+            New-Item -ItemType Directory -Path $targetExt -Force | Out-Null
+            Copy-Item -Path (Join-Path $builtExt "*") -Destination $targetExt -Recurse -Force
+            $cfgTarget = Join-Path $venv "etc\jupyter\jupyter_server_config.d"
+            $cfgSrc = Join-Path $installDir "extensions\error-assistant\jupyter-config\server-config\ml_platform_error_assistant.json"
+            if (Test-Path $cfgSrc) {
+                New-Item -ItemType Directory -Path $cfgTarget -Force | Out-Null
+                Copy-Item -LiteralPath $cfgSrc -Destination (Join-Path $cfgTarget "ml_platform_error_assistant.json") -Force
+            }
         }
     } catch {
         # Non-fatal if offline
