@@ -206,7 +206,10 @@ try {
             },
           });
         }
-        await waitForService("JupyterLab", isJupyterRunning, 30 * 1000);
+        // Allow up to 10 minutes on first launch: pip install can take several minutes
+        // on a slow network or a cold machine with no cached packages.
+        const jupyterTimeoutMs = 10 * 60 * 1000;
+        await waitForService("JupyterLab", isJupyterRunning, jupyterTimeoutMs);
       } catch (err) {
         console.warn("Could not start JupyterLab (continuing with web app):", err?.message ?? err);
       }
@@ -225,33 +228,52 @@ try {
     }
 
     if (canStartPython) {
+      // Check that uvicorn is actually installed before attempting to spawn it.
+      // On first launch the venv may still be mid-install; if uvicorn is absent
+      // we skip the API server silently — all core ML features are served by the
+      // JupyterLab server extension (ml_platform_error_assistant) on port 8899.
+      let uvicornAvailable = false;
       try {
-        const localOrigins = await readLocalOriginSetting();
-        console.log(`Starting the local ModelMind API at ${apiUrl}.`);
-        startChild(
-          pythonExecutable,
-          [
-            "-m",
-            "uvicorn",
-            "main:app",
-            "--host",
-            "127.0.0.1",
-            "--port",
-            String(apiPort),
-          ],
-          {
-            cwd: backendDirectory,
-            env: {
-              ...process.env,
-              ...(localOrigins ? { MODELMIND_WEB_ORIGINS: localOrigins } : {}),
-              MODELMIND_API_PORT: String(apiPort),
-              MODELMIND_JUPYTER_PORT: String(jupyterPort),
-            },
-          },
+        const { execFileSync } = await import("node:child_process");
+        execFileSync(pythonExecutable, ["-c", "import uvicorn"], { stdio: "ignore" });
+        uvicornAvailable = true;
+      } catch {
+        console.warn(
+          "uvicorn is not yet available in the virtual environment. " +
+          "The local ModelMind Python API will be skipped this session. " +
+          "Restart ModelMind after installation completes to enable it."
         );
-        await waitForService("ModelMind API", isBackendRunning, 30 * 1000);
-      } catch (err) {
-        console.warn("Could not start ModelMind Python API (continuing with web app):", err?.message ?? err);
+      }
+
+      if (uvicornAvailable) {
+        try {
+          const localOrigins = await readLocalOriginSetting();
+          console.log(`Starting the local ModelMind API at ${apiUrl}.`);
+          startChild(
+            pythonExecutable,
+            [
+              "-m",
+              "uvicorn",
+              "main:app",
+              "--host",
+              "127.0.0.1",
+              "--port",
+              String(apiPort),
+            ],
+            {
+              cwd: backendDirectory,
+              env: {
+                ...process.env,
+                ...(localOrigins ? { MODELMIND_WEB_ORIGINS: localOrigins } : {}),
+                MODELMIND_API_PORT: String(apiPort),
+                MODELMIND_JUPYTER_PORT: String(jupyterPort),
+              },
+            },
+          );
+          await waitForService("ModelMind API", isBackendRunning, 30 * 1000);
+        } catch (err) {
+          console.warn("Could not start ModelMind Python API (continuing with web app):", err?.message ?? err);
+        }
       }
     }
   }
