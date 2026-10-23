@@ -9,10 +9,16 @@ __pycache__/
 .jupyter_runtime/
 .DS_Store
 Thumbs.db
-.env
-.env.*
+# Environment files tracked for full backup and rapid setup
+!.env
 !.env.example
+!.env.local
 dist/
 build/
 *.egg-info/
-modelmind-source/
+
+# Local credentials must not be committed.
+modelmind-source/.env.local
+
+# Local credentials must not be committed.
+/.env
