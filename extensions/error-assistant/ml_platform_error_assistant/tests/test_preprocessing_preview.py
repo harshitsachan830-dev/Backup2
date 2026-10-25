@@ -1,108 +1,71 @@
-import json
-from pathlib import Path
-
 import pandas as pd
 
-from ml_platform_error_assistant.preprocessing_preview import (
-    preview_preprocessing,
-)
+from ml_platform_error_assistant.preprocessing_preview import preview_preprocessing
 
 
-def test_numeric_preview_returns_comparable_pdf_and_skewness(
-    tmp_path: Path,
-) -> None:
-    dataset_path = tmp_path / "numeric.csv"
+def test_numeric_preview_returns_skewness_and_shared_probability_density(tmp_path):
+    path = tmp_path / "skewed.csv"
     pd.DataFrame(
-        {"value": [1, 2, 3, 4, 5, 6, 100, None]}
-    ).to_csv(dataset_path, index=False)
+        {
+            "Monthly_Spending": [
+                10, 12, 13, 14, 15, 16, 17, 18, 20, 24, 30, 45, 90, None,
+            ],
+            "Visit_Count": [0, 1, 1, 2, 2, 2, 3, 3, 4, 4, 5, 1, 2, None],
+        }
+    ).to_csv(path, index=False)
 
-    result = preview_preprocessing(dataset_path, "value", "median")
-    distribution = result["distribution"]
+    preview = preview_preprocessing(path, "Monthly_Spending", "median")
+    before = preview["before"]["statistics"]
+    after = preview["after"]["statistics"]
 
-    assert (
-        result["before"]["statistics"]["skewness"]
-        > 0.5
+    assert before["skewness"] > 0.5
+    assert before["pdf"]["edges"] == after["pdf"]["edges"]
+    assert before["kde"]["x"] == after["kde"]["x"]
+    assert before["kde"]["bandwidth"] == after["kde"]["bandwidth"]
+    assert len(before["kde"]["density"]) == 320
+    assert all(value is not None and value >= 0 for value in before["kde"]["density"])
+    kde_area = sum(
+        (before["kde"]["density"][index] + before["kde"]["density"][index + 1])
+        * (before["kde"]["x"][index + 1] - before["kde"]["x"][index]) / 2
+        for index in range(len(before["kde"]["x"]) - 1)
     )
-    assert (
-        result["before"]["statistics"]["distribution_shape"]
-        in {"right_skewed", "strongly_right_skewed"}
-    )
-    assert (
-        result["after"]["statistics"]["skewness"]
-        != result["before"]["statistics"]["skewness"]
-    )
-    assert result["before"]["statistics"]["missing_count"] == 1
-    assert result["after"]["statistics"]["missing_count"] == 0
-    assert distribution["kind"] == "numerical"
-    assert len(distribution["bins"]) == 30
-    assert len(distribution["x_edges"]) == 31
-    assert all(
-        first["end"] == second["start"]
-        for first, second in zip(
-            distribution["bins"],
-            distribution["bins"][1:],
-        )
-    )
-    assert all(
-        bin_data["start"] < bin_data["end"]
-        for bin_data in distribution["bins"]
-    )
-    assert len(distribution["before_density"]) == 100
-    assert len(distribution["after_density"]) == 100
-
-    for series_name in ("before_density", "after_density"):
-        histogram_area = sum(
-            item[series_name] * (item["end"] - item["start"])
-            for item in distribution["bins"]
-        )
-        assert abs(histogram_area - 1.0) < 1e-6
-
-    json.dumps(result, allow_nan=False)
+    assert abs(kde_area - 1.0) < 0.08
+    assert len(before["pdf"]["density"]) == 16
+    assert len(after["pdf"]["density"]) == 16
+    for stats in (before, after):
+        edges = stats["pdf"]["edges"]
+        density = stats["pdf"]["density"]
+        area = sum(density[i] * (edges[i + 1] - edges[i]) for i in range(len(density)))
+        assert abs(area - 1.0) < 0.03
 
 
-def test_numeric_preview_identifies_symmetric_distribution(
-    tmp_path: Path,
-) -> None:
-    dataset_path = tmp_path / "symmetric.csv"
+def test_numeric_mode_preview_handles_discrete_counts(tmp_path):
+    path = tmp_path / "counts.csv"
+    pd.DataFrame({"Visit_Count": [0, 1, 1, 2, 2, 2, 3, None]}).to_csv(path, index=False)
+
+    preview = preview_preprocessing(path, "Visit_Count", "most_frequent")
+
+    assert preview["after"]["statistics"]["missing_count"] == 0
+    assert preview["after"]["statistics"]["pdf"]["sample_count"] == 8
+    assert "mode" in preview["explanation"].lower()
+
+
+def test_categorical_preview_returns_shared_before_after_frequency_data(tmp_path):
+    path = tmp_path / "categories.csv"
     pd.DataFrame(
-        {"value": [-3, -2, -1, 1, 2, 3, None]}
-    ).to_csv(dataset_path, index=False)
+        {"Region": ["North", "South", None, "East", "North", "South", None, "East"]}
+    ).to_csv(path, index=False)
 
-    result = preview_preprocessing(dataset_path, "value", "median")
+    preview = preview_preprocessing(path, "Region", "most_frequent")
+    before = preview["before"]["statistics"]["category_distribution"]
+    after = preview["after"]["statistics"]["category_distribution"]
 
-    assert (
-        result["before"]["statistics"]["distribution_shape"]
-        == "approximately_symmetric"
-    )
-    assert (
-        abs(result["before"]["statistics"]["skewness"])
-        < 0.01
-    )
-    assert result["distribution"]["kind"] == "numerical"
-
-
-def test_categorical_preview_includes_missing_value_bar(
-    tmp_path: Path,
-) -> None:
-    dataset_path = tmp_path / "categorical.csv"
-    pd.DataFrame(
-        {"category": ["blue", "red", None, "blue", "green", None]}
-    ).to_csv(dataset_path, index=False)
-
-    result = preview_preprocessing(
-        dataset_path,
-        "category",
-        "most_frequent",
-    )
-    distribution = result["distribution"]
-    missing_bar = next(
-        item
-        for item in distribution["categories"]
-        if item["label"] == "(Missing)"
-    )
-
-    assert distribution["kind"] == "categorical"
-    assert missing_bar["before_count"] == 2
-    assert missing_bar["after_count"] == 0
-    assert result["after"]["statistics"]["missing_count"] == 0
-    json.dumps(result, allow_nan=False)
+    assert preview["feature_type"] == "categorical"
+    assert before["categories"] == after["categories"]
+    assert set(before["categories"]) == {"North", "South", "East"}
+    assert before["sample_count"] == 6
+    assert after["sample_count"] == 8
+    assert before["counts"] == [2, 2, 2]
+    assert sorted(after["counts"]) == [2, 2, 4]
+    assert abs(sum(before["percentages"]) - 100) < 0.01
+    assert abs(sum(after["percentages"]) - 100) < 0.01

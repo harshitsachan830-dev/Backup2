@@ -43,7 +43,7 @@ jobs:
         if: matrix.platform == 'macOS'
         env:
           MODELMIND_PACKAGE_SUFFIX: ${{ matrix.suffix }}
-          MODELMIND_APP_VERSION: "0.2.3"
+          MODELMIND_APP_VERSION: "0.2.4"
         run: |
           bash -n scripts/start-beta-macos.command
           bash -n scripts/start-platform.sh
@@ -53,7 +53,7 @@ jobs:
         shell: pwsh
         env:
           MODELMIND_PACKAGE_SUFFIX: ${{ matrix.suffix }}
-          MODELMIND_APP_VERSION: "0.2.3"
+          MODELMIND_APP_VERSION: "0.2.4"
         run: |
           $tokens = $null
           $errors = $null
@@ -99,6 +99,10 @@ jobs:
       - name: Create release notes
         run: |
           cat << 'EOF' > release-notes.md
+          ## What's updated in 0.2.4
+
+          Preprocessing now recognizes numeric measurements stored as text, distinguishes blank cells from invalid nonblank values, and aligns the advice, preview, and generated code.
+
           ## ModelMind Installers & User Guide
 
           ### 🍎 macOS Installers

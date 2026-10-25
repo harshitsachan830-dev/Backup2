@@ -1,6 +1,121 @@
 from pathlib import Path
+import re
+from typing import Any
 
 import pandas as pd
+
+
+_NUMERIC_TEXT_PATTERN = re.compile(
+    r"^\s*(?P<currency>[$₹€£¥])?\s*"
+    r"(?P<number>[+-]?(?:(?:\d{1,3}(?:,\d{3})+)|\d+)"
+    r"(?:\.\d+)?(?:[eE][+-]?\d+)?)\s*"
+    r"(?P<unit>[A-Za-z%]*)\s*$"
+)
+_NUMERIC_NAME_HINTS = {
+    "age", "year", "years", "yr", "yrs", "cgpa", "gpa", "grade",
+    "score", "salary", "income", "revenue", "price", "cost", "amount",
+    "weight", "height", "bmi", "temperature", "duration", "project",
+    "projects", "count", "quantity", "qty", "experience", "rating",
+    "distance", "length", "width", "speed", "hours", "marks", "value",
+}
+_ID_NAME_PATTERN = re.compile(r"(?:^|[_\s-])(?:id|uuid|identifier|code|zipcode|postal|phone)(?:$|[_\s-])", re.I)
+_DATE_NAME_PATTERN = re.compile(r"(?:^|[_\s-])(?:date|datetime|timestamp|dob|birth)(?:$|[_\s-])", re.I)
+_KNOWN_NUMERIC_UNITS = {
+    "kg", "kgs", "kilogram", "kilograms", "g", "gram", "grams",
+    "cm", "centimeter", "centimeters", "m", "meter", "meters", "mm",
+    "lb", "lbs", "pound", "pounds", "in", "inch", "inches", "ft",
+    "yr", "yrs", "year", "years", "month", "months", "day", "days",
+    "hour", "hours", "hr", "hrs", "%",
+}
+
+
+def parse_numeric_text(series: pd.Series) -> pd.Series:
+    """Parse conservative, whole-cell numeric text (commas, currency, known units)."""
+    if pd.api.types.is_numeric_dtype(series):
+        return pd.to_numeric(series, errors="coerce")
+
+    def parse(value: Any) -> float:
+        if pd.isna(value):
+            return float("nan")
+        match = _NUMERIC_TEXT_PATTERN.fullmatch(str(value))
+        if not match:
+            return float("nan")
+        unit = match.group("unit").lower()
+        if unit and unit not in _KNOWN_NUMERIC_UNITS:
+            return float("nan")
+        try:
+            return float(match.group("number").replace(",", ""))
+        except ValueError:
+            return float("nan")
+
+    return series.map(parse).astype("float64")
+
+
+def infer_numeric_text(series: pd.Series, column: str) -> dict[str, Any]:
+    """Conservatively recognize numeric measurements stored as text, not IDs/dates/classes."""
+    parsed = parse_numeric_text(series)
+    if pd.api.types.is_numeric_dtype(series):
+        return {
+            "is_numeric_text": False,
+            "parsed": parsed,
+            "parse_failure_count": 0,
+            "parse_success_ratio": 1.0 if series.notna().any() else 0.0,
+            "numeric_text_units": [],
+        }
+    raw = series.dropna()
+    parse_failures = int((parsed.isna() & series.notna()).sum())
+    ratio = float(parsed.notna().sum() / len(raw)) if len(raw) else 0.0
+    name = str(column).strip().lower()
+    tokens = set(re.findall(r"[a-z]+", name))
+    semantic_hint = bool(tokens & _NUMERIC_NAME_HINTS)
+    id_or_date = bool(
+        _ID_NAME_PATTERN.search(name)
+        or _DATE_NAME_PATTERN.search(name)
+        or name.endswith(("id", "uuid", "code"))
+    )
+    raw_units: set[str] = set()
+    currency_seen = False
+    for value in raw.astype(str):
+        match = _NUMERIC_TEXT_PATTERN.fullmatch(value)
+        if match:
+            if match.group("unit"):
+                raw_units.add(match.group("unit").lower())
+            currency_seen = currency_seen or bool(match.group("currency"))
+    # Low-cardinality numeric codes (for example gender 0/1) stay categorical
+    # unless the column name or explicit measurement units establish semantics.
+    unit_groups = {"mass" if u in {"kg", "kgs", "kilogram", "kilograms", "g", "gram", "grams", "lb", "lbs", "pound", "pounds"}
+                   else "length" if u in {"cm", "centimeter", "centimeters", "m", "meter", "meters", "mm", "in", "inch", "inches", "ft"}
+                   else "time" if u in {"yr", "yrs", "year", "years", "month", "months", "day", "days", "hour", "hours", "hr", "hrs"}
+                   else u for u in raw_units}
+    compatible_units = len(raw_units) <= 1 and len(unit_groups) <= 1
+    decimal_signal = any("." in str(v) for v in raw.head(100))
+    strong_numeric_values = (
+        ratio >= 0.9 and compatible_units
+        and (decimal_signal or currency_seen or bool(raw_units))
+    )
+    inferred = bool(
+        not id_or_date and compatible_units and ratio >= 0.8
+        and (semantic_hint or strong_numeric_values)
+    )
+    return {
+        "is_numeric_text": inferred,
+        "parsed": parsed,
+        "parse_failure_count": parse_failures if inferred else 0,
+        "parse_success_ratio": round(ratio, 4),
+        "numeric_text_units": sorted(raw_units),
+    }
+
+
+def numeric_text_conversion_code(column: str, dataframe: str = "df") -> str:
+    """Runnable pandas code mirroring parse_numeric_text for generated examples."""
+    return (
+        f"# Parse numeric values stored as text in {column!r}; invalid cells become NaN for review.\n"
+        f"_raw_numeric_text = {dataframe}[{column!r}].astype('string').str.extract(\n"
+        "    r\"^\\s*[$₹€£¥]?\\s*([+-]?(?:(?:\\d{1,3}(?:,\\d{3})+)|\\d+)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?)\\s*(?:kg|kgs|kilograms?|grams?|g|cm|centimeters?|m|meters?|mm|lbs?|pounds?|inches?|in|ft|years?|yrs?|months?|days?|hours?|hrs?|%)?\\s*$\",\n"
+        "    flags=re.IGNORECASE, expand=False\n"
+        ")\n"
+        f"{dataframe}[{column!r}] = pd.to_numeric(_raw_numeric_text.str.replace(',', '', regex=False), errors='coerce')\n"
+    )
 
 
 # =========================================================
@@ -48,21 +163,14 @@ def analyze_dataset(
             "message": str(error),
         }
 
-    numeric_columns = (
-        df.select_dtypes(
-            include="number"
-        )
-        .columns
-        .tolist()
-    )
-
-    categorical_columns = (
-        df.select_dtypes(
-            exclude="number"
-        )
-        .columns
-        .tolist()
-    )
+    numeric_columns = [
+        column for column in df.columns
+        if pd.api.types.is_numeric_dtype(df[column])
+        or infer_numeric_text(df[column], str(column))["is_numeric_text"]
+    ]
+    categorical_columns = [
+        column for column in df.columns if column not in numeric_columns
+    ]
 
     missing_values = (
         df.isnull()
@@ -205,9 +313,7 @@ def analyze_target(
         target.isnull().sum()
     )
 
-    non_null_target = (
-        target.dropna()
-    )
+    non_null_target = target.dropna()
 
     non_null_count = int(
         len(non_null_target)
@@ -221,12 +327,16 @@ def analyze_target(
         target.dtype
     )
 
-    is_numeric = bool(
-        pd.api.types
-        .is_numeric_dtype(
-            target
-        )
-    )
+    numeric_text = infer_numeric_text(target, target_column)
+    is_numeric_text = bool(numeric_text["is_numeric_text"])
+    is_numeric = bool(pd.api.types.is_numeric_dtype(target) or is_numeric_text)
+    actual_missing_count = missing_count
+    parse_failure_count = int(numeric_text["parse_failure_count"])
+    if is_numeric_text:
+        non_null_target = numeric_text["parsed"].dropna()
+        non_null_count = int(len(non_null_target))
+        unique_count = int(non_null_target.nunique())
+        missing_count = int(total_rows - non_null_count)
 
     # =====================================================
     # DETECT ML TASK
@@ -309,6 +419,12 @@ def analyze_target(
 
         "is_numeric":
             is_numeric,
+
+        "is_numeric_text": is_numeric_text,
+
+        "actual_missing_count": actual_missing_count,
+
+        "parse_failure_count": parse_failure_count,
 
         "total_rows":
             total_rows,
@@ -567,9 +683,7 @@ def analyze_feature(
 
     non_null = feature.dropna()
 
-    non_null_count = int(
-        len(non_null)
-    )
+    non_null_count = int(len(non_null))
 
     unique_count = int(
         non_null.nunique()
@@ -577,24 +691,38 @@ def analyze_feature(
 
     dtype = str(feature.dtype)
 
-    is_numeric = bool(
-        pd.api.types.is_numeric_dtype(
-            feature
-        )
+    numeric_text = infer_numeric_text(feature, feature_column)
+    is_native_numeric = bool(pd.api.types.is_numeric_dtype(feature))
+    is_numeric = bool(is_native_numeric or numeric_text["is_numeric_text"])
+    numeric_feature = (
+        pd.to_numeric(non_null, errors="coerce").dropna()
+        if is_native_numeric else numeric_text["parsed"].dropna()
+    )
+    effective_missing_count = int(total_rows - len(numeric_feature)) if is_numeric else missing_count
+    effective_non_null_count = int(len(numeric_feature)) if is_numeric else non_null_count
+    effective_unique_count = int(numeric_feature.nunique()) if is_numeric else unique_count
+    effective_missing_percentage = (
+        (effective_missing_count / total_rows) * 100 if total_rows > 0 else 0
     )
 
     result = {
         "feature": feature_column,
         "dtype": dtype,
         "is_numeric": is_numeric,
+        "is_numeric_text": bool(numeric_text["is_numeric_text"]),
+        "numeric_conversion_required": bool(numeric_text["is_numeric_text"]),
+        "parse_failure_count": int(numeric_text["parse_failure_count"]),
+        "parse_success_ratio": numeric_text["parse_success_ratio"],
+        "numeric_text_units": numeric_text["numeric_text_units"],
+        "actual_missing_count": missing_count,
         "total_rows": total_rows,
-        "non_null_count": non_null_count,
-        "missing_count": missing_count,
+        "non_null_count": effective_non_null_count,
+        "missing_count": effective_missing_count,
         "missing_percentage": round(
-            missing_percentage,
+            effective_missing_percentage,
             2,
         ),
-        "unique_count": unique_count,
+        "unique_count": effective_unique_count,
     }
 
     # =====================================================
@@ -602,14 +730,10 @@ def analyze_feature(
     # =====================================================
 
     if is_numeric:
-
-        numeric_feature = (
-            pd.to_numeric(
-                non_null,
-                errors="coerce",
-            )
-            .dropna()
-        )
+        missing_count = effective_missing_count
+        missing_percentage = effective_missing_percentage
+        non_null_count = effective_non_null_count
+        unique_count = effective_unique_count
 
         if len(numeric_feature) == 0:
 

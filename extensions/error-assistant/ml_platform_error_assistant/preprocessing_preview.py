@@ -8,6 +8,7 @@ import numpy as np
 from .dataset import (
     analyze_feature,
     load_dataset,
+    parse_numeric_text,
 )
 
 
@@ -15,6 +16,11 @@ SUPPORTED_NUMERICAL_STRATEGIES = {
     "mean",
     "median",
     "most_frequent",
+    "constant",
+    "standard_scaler",
+    "minmax_scaler",
+    "robust_scaler",
+    "cap_outliers_iqr",
 }
 
 SUPPORTED_CATEGORICAL_STRATEGIES = {
@@ -441,6 +447,11 @@ def preview_preprocessing(
     original_series = (
         df[feature].copy()
     )
+    numeric_series = (
+        parse_numeric_text(original_series)
+        if is_numeric
+        else original_series
+    )
 
     before_sample = _sample_values(
         original_series
@@ -459,14 +470,12 @@ def preview_preprocessing(
                 "and most_frequent."
             )
 
-        before_stats = _numeric_stats(
-            original_series
-        )
+        before_stats = _numeric_stats(numeric_series)
 
         if normalized_strategy == "mean":
             transformed_series, fill_value = (
                 _preview_mean(
-                    original_series
+                    numeric_series
                 )
             )
 
@@ -479,7 +488,7 @@ def preview_preprocessing(
         elif normalized_strategy == "median":
             transformed_series, fill_value = (
                 _preview_median(
-                    original_series
+                    numeric_series
                 )
             )
 
@@ -489,10 +498,10 @@ def preview_preprocessing(
                 "feature median for this preview."
             )
 
-        else:
+        elif normalized_strategy == "most_frequent":
             transformed_series, fill_value = (
                 _preview_most_frequent(
-                    original_series
+                    numeric_series
                 )
             )
             explanation = (
@@ -500,6 +509,32 @@ def preview_preprocessing(
                 "with the most frequent observed value (mode). This keeps "
                 "imputed counts or ratings on observed values."
             )
+        elif normalized_strategy == "constant":
+            transformed_series = numeric_series.fillna(0)
+            fill_value = 0
+            explanation = "Missing or unparseable numeric values are temporarily filled with 0. Confirm that zero has a valid meaning for this feature."
+        elif normalized_strategy == "cap_outliers_iqr":
+            observed = numeric_series.dropna()
+            if observed.empty:
+                raise ValueError("IQR capping needs at least one parseable numeric value.")
+            q1, q3 = float(observed.quantile(0.25)), float(observed.quantile(0.75))
+            spread = q3 - q1
+            lower, upper = q1 - 1.5 * spread, q3 + 1.5 * spread
+            transformed_series = numeric_series.clip(lower=lower, upper=upper)
+            fill_value = {"lower": lower, "upper": upper}
+            explanation = "Observed values outside the 1.5×IQR bounds are capped in this in-memory preview; missing values remain missing. Review flagged rows before applying."
+        elif normalized_strategy in {"standard_scaler", "minmax_scaler", "robust_scaler"}:
+            filled = numeric_series.fillna(numeric_series.median())
+            if normalized_strategy == "standard_scaler":
+                center, scale = float(filled.mean()), float(filled.std(ddof=0))
+            elif normalized_strategy == "minmax_scaler":
+                center, scale = float(filled.min()), float(filled.max() - filled.min())
+            else:
+                center = float(filled.median())
+                scale = float(filled.quantile(0.75) - filled.quantile(0.25))
+            transformed_series = (filled - center) / scale if scale else filled * 0
+            fill_value = {"center": center, "scale": scale}
+            explanation = f"Missing values are median-imputed and {normalized_strategy.replace('_', ' ')} parameters are estimated from this full preview column. Use the Advanced train-only pipeline for unbiased model evaluation."
 
         after_stats = _numeric_stats(
             transformed_series
@@ -509,13 +544,13 @@ def preview_preprocessing(
         # shows the effect of the selected strategy rather than two unrelated
         # histogram scales.
         combined = pd.concat(
-            [pd.to_numeric(original_series, errors="coerce"), transformed_series]
+            [numeric_series, transformed_series]
         ).dropna()
         if not combined.empty:
             histogram_min = float(combined.min())
             histogram_max = float(combined.max())
             before_stats["pdf"] = _histogram_pdf(
-                original_series, histogram_min, histogram_max
+                numeric_series, histogram_min, histogram_max
             )
             after_stats["pdf"] = _histogram_pdf(
                 transformed_series, histogram_min, histogram_max
@@ -524,7 +559,7 @@ def preview_preprocessing(
             if kde_grid is not None:
                 grid, bandwidth = kde_grid
                 before_stats["kde"] = _gaussian_kde(
-                    original_series, grid, bandwidth
+                    numeric_series, grid, bandwidth
                 )
                 after_stats["kde"] = _gaussian_kde(
                     transformed_series, grid, bandwidth
@@ -596,9 +631,17 @@ def preview_preprocessing(
     )
 
     changed_count = int(
-        original_series.isna().sum()
+        numeric_series.isna().sum()
         - transformed_series.isna().sum()
     )
+    parse_failure_count = int(analysis.get("parse_failure_count", 0))
+    actual_missing_count = int(analysis.get("actual_missing_count", original_series.isna().sum()))
+    if analysis.get("numeric_conversion_required"):
+        explanation = (
+            f"Numeric-looking text is parsed for this preview; {parse_failure_count} unparseable nonblank value(s) "
+            f"are treated as gaps, in addition to {actual_missing_count} blank cell(s). "
+            + explanation
+        )
 
     return {
         "handled": True,
@@ -615,6 +658,9 @@ def preview_preprocessing(
             if is_numeric
             else "categorical"
         ),
+        "numeric_conversion_required": bool(analysis.get("numeric_conversion_required", False)),
+        "actual_missing_count": actual_missing_count,
+        "parse_failure_count": parse_failure_count,
 
         "strategy":
             normalized_strategy,

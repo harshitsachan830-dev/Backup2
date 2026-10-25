@@ -1,6 +1,10 @@
 # Build Context
 
-Last updated: 2026-10-24
+Last updated: 2026-10-26
+
+## Version 0.2.4
+
+This release incorporates the numeric-text preprocessing improvement: conservative detection of measurement columns, separate reporting of blank and unparseable cells, and consistent handling across recommendations, previews, and generated preprocessing code. The private companion installer workflow builds all supported macOS and Windows assets for the `private-companion-v0.2.4` tag.
 
 ## Source of truth
 

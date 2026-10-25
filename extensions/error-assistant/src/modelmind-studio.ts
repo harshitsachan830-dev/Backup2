@@ -75,6 +75,9 @@ export interface TargetAnalysisResult {
   unique_count?: number;
   dtype?: string;
   is_numeric?: boolean;
+  is_numeric_text?: boolean;
+  actual_missing_count?: number;
+  parse_failure_count?: number;
   class_counts?: Record<string, number>;
   class_percentages?: Record<string, number>;
   imbalance_ratio?: number;
@@ -155,6 +158,11 @@ export interface PreprocessingRec {
   explanation: string;
   example_code: string;
   warnings?: string[];
+  actual_missing_count?: number;
+  parse_failure_count?: number;
+  parse_success_ratio?: number;
+  numeric_conversion_required?: boolean;
+  is_numeric_text?: boolean;
   why?: string;
   risks?: string;
 }
@@ -1292,7 +1300,9 @@ export class ModelMindStudioWidget extends Widget {
         <span class="mm-studio-badge ${rec.feature_type === 'numerical' ? 'badge-num' : 'badge-cat'}">${rec.feature_type.toUpperCase()}</span>
       </div>
       <span class="mm-studio-badge" style="background:${sevColor}22; color:${sevColor}; border:1px solid ${sevColor}44;">
-        ${rec.missing_count} MISSING (${rec.missing_pct}%)
+        ${rec.numeric_conversion_required && (rec.parse_failure_count || 0) > 0
+          ? `${rec.actual_missing_count || 0} BLANK + ${rec.parse_failure_count} UNPARSEABLE (${rec.missing_pct}%)`
+          : `${rec.missing_count} MISSING (${rec.missing_pct}%)`}
       </span>
     `;
 

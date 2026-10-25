@@ -122,6 +122,24 @@ export function buildFullPreprocessingCode(
       operation = `# No transformation is needed for ${featureName}.`;
   }
 
+  if (
+    rec.numeric_conversion_required &&
+    rec.feature_type === 'numerical' &&
+    strategy !== 'drop_column'
+  ) {
+    imports.add('import re');
+    operation = [
+      `# Parse recognized numeric text in ${featureName}; malformed cells become NaN for review.`,
+      `_raw_numeric_text = ${featureAccess}.astype('string').str.extract(`,
+      `    r"^\\s*[$₹€£¥]?\\s*([+-]?(?:(?:\\d{1,3}(?:,\\d{3})+)|\\d+)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?)\\s*(?:kg|kgs|kilograms?|grams?|g|cm|centimeters?|m|meters?|mm|lbs?|pounds?|inches?|in|ft|years?|yrs?|months?|days?|hours?|hrs?|%)?\\s*$",`,
+      '    flags=re.IGNORECASE, expand=False',
+      ')',
+      `${featureAccess} = pd.to_numeric(_raw_numeric_text.str.replace(',', '', regex=False), errors='coerce')`,
+      '',
+      operation
+    ].join('\n');
+  }
+
   return [
     '# Complete preprocessing workflow for the analyzed dataset',
     ...Array.from(imports),

@@ -6,6 +6,8 @@ import pandas as pd
 from .dataset import (
     analyze_feature,
     load_dataset,
+    numeric_text_conversion_code,
+    parse_numeric_text,
 )
 
 
@@ -226,6 +228,22 @@ def _numeric_recommendation(
     transformation = str(analysis.get("transformation_strategy", "none"))
 
     warnings: list[str] = []
+    numeric_conversion_required = bool(
+        analysis.get("numeric_conversion_required", False)
+    )
+    parse_failure_count = int(analysis.get("parse_failure_count", 0))
+
+    if numeric_conversion_required:
+        if parse_failure_count:
+            warnings.append(
+                f"This measurement appears numeric but is stored as text. "
+                f"{parse_failure_count} nonblank value(s) could not be safely parsed; "
+                "the preview counts them as gaps. Inspect those source cells before applying an imputer."
+            )
+        else:
+            warnings.append(
+                "This numeric measurement is stored as text. The generated code converts it to numbers before preprocessing."
+            )
 
     if unique_count <= 1:
         warnings.append(
@@ -676,10 +694,33 @@ def _numeric_recommendation(
             "Always use fit_transform() on X_train and transform() on X_test."
         )
 
+    why = (
+        "The column is stored as text, so ModelMind parsed only complete numeric values with recognized formatting "
+        "for its profile. "
+        + (f"The {missing_count} effective gap(s) include {int(analysis.get('actual_missing_count', 0))} blank cell(s) "
+           f"and {parse_failure_count} unparseable nonblank value(s). Review them because coercion treats invalid text as missing. "
+           if parse_failure_count else
+           f"It has {int(analysis.get('actual_missing_count', 0))} blank cell(s); the generated code converts the column before imputation. ")
+        + why
+        if numeric_conversion_required else why
+    )
+    if numeric_conversion_required:
+        missing_code = (
+            "import pandas as pd\nimport re\n\n"
+            + numeric_text_conversion_code(feature)
+            + "\n"
+            + missing_code
+        )
+
     return {
         "feature": feature,
         "feature_type": "numerical",
         "dtype": analysis.get("dtype"),
+        "actual_missing_count": int(analysis.get("actual_missing_count", missing_count)),
+        "parse_failure_count": parse_failure_count,
+        "parse_success_ratio": analysis.get("parse_success_ratio"),
+        "numeric_conversion_required": numeric_conversion_required,
+        "is_numeric_text": bool(analysis.get("is_numeric_text", False)),
         "missing_count": missing_count,
         "missing_pct": _round(missing_percentage),
         "missing_percentage": _round(missing_percentage),
@@ -1060,12 +1101,17 @@ def _build_advanced_pipeline_summary(
     df: pd.DataFrame,
     numeric_cols: list[str],
     categorical_cols: list[str],
+    numeric_text_cols: list[str] | None = None,
 ) -> str:
     """Generate a suggested full ColumnTransformer pipeline for all columns."""
     numeric_groups: dict[tuple[str, bool], list[str]] = {}
     omitted_numeric_cols: list[str] = []
     for column in numeric_cols:
-        values = pd.to_numeric(df[column], errors="coerce").dropna()
+        values = (
+            parse_numeric_text(df[column])
+            if numeric_text_cols and column in numeric_text_cols
+            else pd.to_numeric(df[column], errors="coerce")
+        ).dropna()
         if values.empty:
             omitted_numeric_cols.append(column)
             continue
@@ -1104,6 +1150,8 @@ def _build_advanced_pipeline_summary(
         "# ═══════════════════════════════════════════════════════\n"
         "# Suggested Full Pipeline (ColumnTransformer)\n"
         "# ═══════════════════════════════════════════════════════\n"
+        "import pandas as pd\n"
+        "import re\n"
         "from sklearn.impute import SimpleImputer\n"
         "from sklearn.preprocessing import StandardScaler, PowerTransformer, OneHotEncoder, OrdinalEncoder\n"
         "from sklearn.pipeline import Pipeline\n"
@@ -1132,6 +1180,14 @@ def _build_advanced_pipeline_summary(
         "numerical_cols = [column for column in numerical_cols if column in X.columns]\n"
         "one_hot_cols = [column for column in one_hot_cols if column in X.columns]\n"
         "ordinal_cols = [column for column in ordinal_cols if column in X.columns]\n"
+        f"numeric_text_cols = {[column for column in (numeric_text_cols or [])]!r}\n"
+        "numeric_text_cols = [column for column in numeric_text_cols if column in X.columns]\n"
+        "for column in numeric_text_cols:\n"
+        "    _raw_numeric_text = X[column].astype('string').str.extract(\n"
+        "        r\"^\\s*[$₹€£¥]?\\s*([+-]?(?:(?:\\d{1,3}(?:,\\d{3})+)|\\d+)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?)\\s*(?:kg|kgs|kilograms?|grams?|g|cm|centimeters?|m|meters?|mm|lbs?|pounds?|inches?|in|ft|years?|yrs?|months?|days?|hours?|hrs?|%)?\\s*$\",\n"
+        "        flags=re.IGNORECASE, expand=False\n"
+        "    )\n"
+        "    X[column] = pd.to_numeric(_raw_numeric_text.str.replace(',', '', regex=False), errors='coerce')\n"
     ]
 
     transformers: list[str] = []
@@ -1231,6 +1287,7 @@ def analyze_preprocessing(
     warning_count = 0
     numeric_cols: list[str] = []
     categorical_cols: list[str] = []
+    numeric_text_cols: list[str] = []
 
     for column in df.columns:
         feature_analysis = analyze_feature(path, str(column))
@@ -1240,6 +1297,8 @@ def analyze_preprocessing(
             recommendation = _numeric_recommendation(feature_analysis, normalized_level)
             if feature_analysis.get("imputation_strategy") != "drop_column":
                 numeric_cols.append(str(column))
+            if feature_analysis.get("numeric_conversion_required"):
+                numeric_text_cols.append(str(column))
         else:
             categorical_count += 1
             categorical_cols.append(str(column))
@@ -1263,11 +1322,21 @@ def analyze_preprocessing(
     if columns == 0:
         dataset_warnings.append("The dataset contains no columns.")
 
+    parse_failure_total = sum(
+        int(recommendation.get("parse_failure_count", 0))
+        for recommendation in recommendations
+    )
+    if parse_failure_total:
+        dataset_warnings.append(
+            f"{parse_failure_total} nonblank value(s) in inferred numeric text columns could not be parsed. "
+            "These are shown separately from blank cells and need source-data review."
+        )
+
     # For advanced level, attach a full pipeline suggestion
     pipeline_code: str | None = None
     if normalized_level == "advanced":
         pipeline_code = _build_advanced_pipeline_summary(
-            df, numeric_cols, categorical_cols
+            df, numeric_cols, categorical_cols, numeric_text_cols
         )
 
     return {

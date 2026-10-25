@@ -133,6 +133,33 @@ describe('@ml-platform/error-assistant', () => {
     expect(code).not.toContain('fillna(fill_value)');
   });
 
+  it('safely parses inferred numeric text when a strategy is changed', () => {
+    const code = buildFullPreprocessingCode(
+      '/workspace/students.csv',
+      {
+        feature: 'Annual Income',
+        feature_type: 'numerical',
+        missing_count: 1,
+        missing_pct: 5,
+        missing_severity: 'low',
+        unique_count: 19,
+        imputation_strategy: 'median',
+        recommended_action: 'Parse then impute',
+        explanation: 'Values are stored as text.',
+        example_code: '',
+        numeric_conversion_required: true
+      },
+      'median'
+    );
+
+    expect(code).toContain('import re');
+    expect(code).toContain('flags=re.IGNORECASE');
+    expect(code).toContain(
+      "df[\"Annual Income\"] = pd.to_numeric(_raw_numeric_text.str.replace(',', '', regex=False), errors='coerce')"
+    );
+    expect(code).toContain('fillna(df["Annual Income"].median())');
+  });
+
   it('explains model-specific rationale using the measured CV result', () => {
     const extraTrees = buildMeasuredModelExplanation({
       name: 'Extra Trees',

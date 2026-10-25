@@ -3,12 +3,18 @@ from typing import Any
 
 import pandas as pd
 
-from .dataset import load_dataset
+from .dataset import analyze_feature, load_dataset, parse_numeric_text
 
 
 SUPPORTED_NUMERICAL_STRATEGIES = {
     "mean",
     "median",
+    "most_frequent",
+    "constant",
+    "standard_scaler",
+    "minmax_scaler",
+    "robust_scaler",
+    "cap_outliers_iqr",
 }
 
 SUPPORTED_CATEGORICAL_STRATEGIES = {
@@ -193,6 +199,16 @@ def _apply_unknown(
     )
 
 
+def _apply_numeric_most_frequent(series: pd.Series) -> tuple[pd.Series, Any]:
+    modes = series.dropna().mode()
+    if modes.empty:
+        raise ValueError(
+            "Most-frequent imputation cannot be applied because this feature has no usable numeric values."
+        )
+    value = modes.iloc[0]
+    return series.fillna(value), _json_safe(value)
+
+
 def apply_preprocessing(
     path: Path,
     feature: str,
@@ -230,11 +246,13 @@ def apply_preprocessing(
         df[feature].copy()
     )
 
-    missing_before = int(
-        original_series.isna().sum()
-    )
+    analysis = analyze_feature(path, feature)
+    is_numeric = bool(analysis.get("is_numeric", False))
+    numeric_conversion_required = bool(analysis.get("numeric_conversion_required", False))
+    transformed_source = parse_numeric_text(original_series) if is_numeric else original_series
+    missing_before = int(transformed_source.isna().sum())
 
-    if missing_before == 0:
+    if missing_before == 0 and not numeric_conversion_required:
         return {
             "handled": True,
             "source": "modelmind-local",
@@ -253,12 +271,6 @@ def apply_preprocessing(
             ),
         }
 
-    is_numeric = bool(
-        pd.api.types.is_numeric_dtype(
-            original_series
-        )
-    )
-
     if is_numeric:
         if (
             normalized_strategy
@@ -267,22 +279,45 @@ def apply_preprocessing(
         ):
             raise ValueError(
                 "Unsupported numerical strategy. "
-                "Supported strategies are mean "
-                "and median."
+                "Choose mean, median, most_frequent, constant, a supported scaler, or cap_outliers_iqr."
             )
 
         if normalized_strategy == "mean":
             transformed, fill_value = (
                 _apply_mean(
-                    original_series
+                    transformed_source
                 )
             )
-        else:
+        elif normalized_strategy == "median":
             transformed, fill_value = (
                 _apply_median(
-                    original_series
+                    transformed_source
                 )
             )
+        elif normalized_strategy == "most_frequent":
+            transformed, fill_value = _apply_numeric_most_frequent(transformed_source)
+        elif normalized_strategy == "constant":
+            transformed, fill_value = transformed_source.fillna(0), 0
+        elif normalized_strategy == "cap_outliers_iqr":
+            observed = transformed_source.dropna()
+            if observed.empty:
+                raise ValueError("IQR capping needs at least one observed numeric value.")
+            q1, q3 = float(observed.quantile(0.25)), float(observed.quantile(0.75))
+            spread = q3 - q1
+            lower, upper = q1 - 1.5 * spread, q3 + 1.5 * spread
+            transformed = transformed_source.clip(lower=lower, upper=upper)
+            fill_value = {"lower": lower, "upper": upper}
+        else:
+            filled = transformed_source.fillna(transformed_source.median())
+            if normalized_strategy == "standard_scaler":
+                center, scale = float(filled.mean()), float(filled.std(ddof=0))
+            elif normalized_strategy == "minmax_scaler":
+                center, scale = float(filled.min()), float(filled.max() - filled.min())
+            else:
+                center = float(filled.median())
+                scale = float(filled.quantile(0.75) - filled.quantile(0.25))
+            transformed = (filled - center) / scale if scale else filled * 0
+            fill_value = {"center": center, "scale": scale}
 
     else:
         if (
@@ -316,16 +351,22 @@ def apply_preprocessing(
         transformed.isna().sum()
     )
 
-    changed_count = (
-        missing_before
-        - missing_after
-    )
+    original_text = original_series.astype("string").fillna("<NA>")
+    transformed_text = transformed.astype("string").fillna("<NA>")
+    changed_count = int(original_text.ne(transformed_text).sum())
 
     if changed_count <= 0:
-        raise ValueError(
-            "The preprocessing operation did not "
-            "resolve any missing values."
-        )
+        return {
+            "handled": True,
+            "source": "modelmind-local",
+            "engine": "preprocessing-apply",
+            "filename": path.name,
+            "feature": feature,
+            "strategy": normalized_strategy,
+            "applied": False,
+            "changed_count": 0,
+            "message": "No values changed for this strategy, so the dataset was left untouched.",
+        }
 
     # IMPORTANT:
     # Backup BEFORE changing the runtime dataset.
@@ -360,6 +401,9 @@ def apply_preprocessing(
         "missing_before":
             missing_before,
 
+        "actual_missing_before": int(analysis.get("actual_missing_count", original_series.isna().sum())),
+        "parse_failure_count": int(analysis.get("parse_failure_count", 0)),
+
         "missing_after":
             missing_after,
 
@@ -372,8 +416,7 @@ def apply_preprocessing(
         "message": (
             f'Applied "{normalized_strategy}" '
             f'to "{feature}". '
-            f"{changed_count} missing value(s) "
-            "were filled."
+            f"Updated {changed_count} value(s); {missing_after} gap(s) remain."
         ),
     }
 
