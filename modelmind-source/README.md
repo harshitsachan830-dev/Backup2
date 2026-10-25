@@ -203,6 +203,18 @@ JupyterLab starts at `http://127.0.0.1:8899`; the API listens at
 website origin. For the website, run `npm run build` and then `npm start`;
 that production command does not start local services.
 
+From the dashboard, open **Notebook** and choose **Open ModelMind Notebook**
+for the full ML Studio workflow or **Open Trainer Notebook** for the
+preview-only learning workflow. Each choice opens its own notebook in the
+local JupyterLab workspace.
+
+In ModelMind Notebook, the ML Studio **Preprocessing** tab provides Basic,
+Medium, and Advanced code examples. Its **Why** explanations use observed
+feature profiles—including skewness, outlier flags, missingness, and category
+count—to explain recommendations and their limitations. They are starting
+points, not guarantees; confirm that each transformation suits the data and
+fit learned preprocessing only on training data.
+
 ## Notebook AI credentials
 
 Choose **API Key** in the dashboard sidebar, then open JupyterLab and select

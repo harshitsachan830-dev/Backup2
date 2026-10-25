@@ -8,10 +8,13 @@ $python = Join-Path $root ".venv\Scripts\python.exe"
 
 Write-Host "== Release readiness check =="
 Write-Host "OS: $os"
-if (Test-Path $python) {
-    & $python --version
-} else {
-    Write-Host "Python venv not found; use the repo environment first."
+if (-not (Test-Path $python)) {
+    throw "Python venv is missing; run scripts\start-platform.ps1 first."
+}
+
+& $python --version
+if ($LASTEXITCODE -ne 0) {
+    throw "Could not run the Python interpreter at $python."
 }
 
 $checks = @(
@@ -38,11 +41,9 @@ if (Get-Command ollama -ErrorAction SilentlyContinue) {
     Write-Host "Ollama is not installed. Local AI remains optional until the user approves installation."
 }
 
-if (Test-Path $python) {
-    & $python -m pytest "extensions/error-assistant" -q
-} else {
-    Write-Host "Python venv is missing; run the venv bootstrap before release checks."
-    throw "Release-check could not execute because the repo Python environment is absent."
+& $python -m pytest "extensions/error-assistant" -q
+if ($LASTEXITCODE -ne 0) {
+    throw "The Python test suite failed with exit code $LASTEXITCODE."
 }
 
 Write-Host ""

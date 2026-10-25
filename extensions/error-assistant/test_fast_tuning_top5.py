@@ -16,6 +16,7 @@ import pytest
 from sklearn.datasets import make_classification, make_regression
 
 from ml_platform_error_assistant.fast_hyperparameter_tuner import (
+    _meaningful_improvement,
     tune_top_five,
 )
 from ml_platform_error_assistant.model_evaluator import evaluate_models
@@ -99,6 +100,25 @@ def test_top_five(task, names):
         assert item["model"] not in seen
         seen.add(item["model"])
         assert 1 <= item["configurations_tested"] <= 8
+        if item["baseline_score"] is not None:
+            if result["higher_is_better"]:
+                assert item["best_score"] >= item["baseline_score"]
+            else:
+                assert item["best_score"] <= item["baseline_score"]
+        if item["recommendation_status"] in {
+            "parameter_changes_recommended",
+            "partial_parameter_changes",
+        }:
+            assert item["selected_configuration"] == "tuned"
+            assert item["best_params"]
+            assert item["improvement_over_default"] > 0
+        elif item["recommendation_status"] in {
+            "defaults_recommended",
+            "partial_defaults_recommended",
+            "insufficient_validation",
+        }:
+            assert item["selected_configuration"] == "defaults"
+            assert item["best_params"] == {}
 
         for attempt in item["attempts"]:
             if attempt["status"] == "success":
@@ -229,6 +249,35 @@ def test_matches_model_advisor_baselines():
     assert tuned["cv_folds"] == advisor["cv_folds"]
 
     print("\nMODEL ADVISOR BASELINE MATCH PASSED")
+
+
+def test_tuning_requires_consistent_practical_improvement():
+    assert _meaningful_improvement(
+        0.80,
+        0.82,
+        task="classification",
+        higher_is_better=True,
+        baseline_fold_scores=[0.78, 0.80, 0.82],
+        candidate_fold_scores=[0.80, 0.82, 0.84],
+    )
+
+    assert not _meaningful_improvement(
+        0.50,
+        0.5263,
+        task="classification",
+        higher_is_better=True,
+        baseline_fold_scores=[0.50, 0.50, 0.50],
+        candidate_fold_scores=[0.54, 0.54, 0.499],
+    )
+
+    assert not _meaningful_improvement(
+        0.80,
+        0.805,
+        task="classification",
+        higher_is_better=True,
+        baseline_fold_scores=[0.79, 0.80, 0.81],
+        candidate_fold_scores=[0.795, 0.805, 0.815],
+    )
 
 
 if __name__ == "__main__":

@@ -8,7 +8,14 @@ import {
   removeModelAdvisorRaiseGuards,
   resetTunedModelCode
 } from '../model-code-utils';
+import { buildMeasuredModelExplanation } from '../model-advisor-explanations';
+import { explainTuningParameter } from '../tuning-explanations';
 import { requestAPI } from '../request';
+import {
+  canUseNotebookCodeAction,
+  getModelMindNotebookRole,
+  MODEL_MIND_NOTEBOOK_TYPE
+} from '../notebook-mode';
 
 describe('@ml-platform/error-assistant', () => {
   afterEach(() => {
@@ -52,6 +59,28 @@ describe('@ml-platform/error-assistant', () => {
     ).toBe(false);
   });
 
+  it('detects notebook roles and limits Trainer code actions to preview', () => {
+    const trainerModel = {
+      getMetadata: jest.fn((key: string) =>
+        key === MODEL_MIND_NOTEBOOK_TYPE ? 'trainer' : undefined
+      )
+    };
+    const modelMindModel = {
+      getMetadata: jest.fn(() => undefined)
+    };
+
+    expect(getModelMindNotebookRole(trainerModel)).toBe('trainer');
+    expect(getModelMindNotebookRole(modelMindModel)).toBe('modelmind');
+    expect(getModelMindNotebookRole()).toBe('modelmind');
+
+    expect(canUseNotebookCodeAction('trainer', 'preview')).toBe(true);
+    expect(canUseNotebookCodeAction('trainer', 'copy')).toBe(false);
+    expect(canUseNotebookCodeAction('trainer', 'insert')).toBe(false);
+    expect(canUseNotebookCodeAction('modelmind', 'preview')).toBe(true);
+    expect(canUseNotebookCodeAction('modelmind', 'copy')).toBe(true);
+    expect(canUseNotebookCodeAction('modelmind', 'insert')).toBe(true);
+  });
+
   it('loads the selected dataset directly and inserts readable preprocessing code', () => {
     const code = buildFullPreprocessingCode(
       '/workspace/customer data.csv',
@@ -76,6 +105,78 @@ describe('@ml-platform/error-assistant', () => {
     );
     expect(code).not.toMatch(/^\s*raise\s+(?:ValueError|NameError)\b/m);
     expect(code).not.toContain('_mm_available');
+  });
+
+  it('uses the selected skill-level preprocessing example for code actions', () => {
+    const code = buildFullPreprocessingCode(
+      '/workspace/students.csv',
+      {
+        feature: 'city',
+        feature_type: 'categorical',
+        missing_count: 2,
+        missing_pct: 10,
+        missing_severity: 'low',
+        unique_count: 4,
+        imputation_strategy: 'most_frequent_or_unknown',
+        recommended_action: 'Fill missing values and encode categories',
+        explanation: 'Use one-hot encoding.',
+        example_code: ''
+      },
+      'most_frequent',
+      'df = pd.get_dummies(df, columns=["city"], drop_first=True)'
+    );
+
+    expect(code).toContain('df = pd.read_csv("/workspace/students.csv")');
+    expect(code).toContain(
+      'df = pd.get_dummies(df, columns=["city"], drop_first=True)'
+    );
+    expect(code).not.toContain('fillna(fill_value)');
+  });
+
+  it('explains model-specific rationale using the measured CV result', () => {
+    const extraTrees = buildMeasuredModelExplanation({
+      name: 'Extra Trees',
+      task: 'classification',
+      metric: 'Balanced accuracy',
+      score: 0.7613,
+      scoreStd: 0.0249,
+      rank: 2,
+      finalistCount: 5,
+      candidateCount: 12,
+      cvFolds: 3
+    });
+    const decisionTree = buildMeasuredModelExplanation({
+      name: 'Decision Tree',
+      task: 'classification',
+      metric: 'Balanced accuracy',
+      score: 0.72,
+      rank: 3,
+      finalistCount: 5,
+      cvFolds: 3
+    });
+
+    expect(extraTrees.why).toContain('extra-randomized split thresholds');
+    expect(extraTrees.why).toContain(
+      '#2 of 5 successfully evaluated finalists'
+    );
+    expect(extraTrees.why).toContain('76.13%');
+    expect(extraTrees.why).toContain('2.49 percentage points');
+    expect(extraTrees.why).toContain('12 screened candidates');
+    expect(extraTrees.why).toContain('not a promise');
+    expect(decisionTree.why).toContain('if/then splits');
+    expect(decisionTree.why).not.toBe(extraTrees.why);
+  });
+
+  it('explains selected tuning parameters and supports unlisted settings', () => {
+    expect(explainTuningParameter('max_depth')).toContain(
+      'complexity of learned decision rules'
+    );
+    expect(explainTuningParameter('n_estimators')).toContain(
+      'how many trees are combined'
+    );
+    expect(explainTuningParameter('custom_setting')).toContain(
+      'measured cross-validation comparison'
+    );
   });
 
   it('removes generated Model Advisor raise guards but keeps normal code', () => {
@@ -128,9 +229,7 @@ describe('@ml-platform/error-assistant', () => {
     const tunedCode = 'LinearSVC(C=0.01, class_weight="balanced")';
 
     expect(
-      applyTunedModelCode(models, [
-        { model: 'Linear SVM', code: tunedCode }
-      ])
+      applyTunedModelCode(models, [{ model: 'Linear SVM', code: tunedCode }])
     ).toEqual({ updated: 1, errors: [] });
     // Baseline code must be preserved for "Insert into Notebook"
     expect(models[0].code).toBe('LinearSVC(max_iter=3000)');

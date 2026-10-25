@@ -104,6 +104,7 @@ export interface IAdvisorModelCode {
   tuned_params?: Record<string, unknown>;
   tuned_changes?: Array<{ parameter: string; default: unknown; recommended: unknown }>;
   tuned_score?: number | string;
+  tuned_recommendation_status?: string;
   tuned_code_error?: string;
   refreshCode?: () => void;
 }
@@ -117,6 +118,7 @@ export function resetTunedModelCode(models: IAdvisorModelCode[]): void {
     delete model.tuned_params;
     delete model.tuned_changes;
     delete model.tuned_score;
+    delete model.tuned_recommendation_status;
     delete model.tuned_code_error;
     model.refreshCode?.();
   });
@@ -147,6 +149,7 @@ export function applyTunedModelCode(
       score?: unknown;
       best_score?: unknown;
       mean_score?: unknown;
+      recommendation_status?: unknown;
     };
 
     if (typeof item.model !== 'string') {
@@ -196,6 +199,10 @@ export function applyTunedModelCode(
         : undefined;
       const scoreVal = item.best_score ?? item.mean_score ?? item.score;
       model.tuned_score = typeof scoreVal === 'number' ? scoreVal : undefined;
+      model.tuned_recommendation_status =
+        typeof item.recommendation_status === 'string'
+          ? item.recommendation_status
+          : undefined;
       delete model.tuned_code_error;
       model.refreshCode?.();
       updated += 1;
@@ -208,4 +215,3 @@ export function applyTunedModelCode(
 
   return { updated, errors };
 }
-

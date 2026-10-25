@@ -6,12 +6,16 @@ const API_URL = (
   process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000"
 ).replace(/\/+$/, "");
 
+export type NotebookType = "modelmind" | "trainer";
+
 export default function OpenJupyterForm({
   children,
   className,
+  notebookType = "modelmind",
 }: {
   children: React.ReactNode;
   className?: string;
+  notebookType?: NotebookType;
 }) {
   const [error, setError] = useState("");
   const [opening, setOpening] = useState(false);
@@ -30,7 +34,7 @@ export default function OpenJupyterForm({
       const response = await fetch(`${API_URL}/jupyter/prepare`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: "{}",
+        body: JSON.stringify({ notebook_type: notebookType }),
       });
       const result = (await response.json()) as {
         detail?: string;
@@ -47,7 +51,8 @@ export default function OpenJupyterForm({
     }
 
     try {
-      notebookWindow.location.href = `${API_URL}/jupyter/open`;
+      notebookWindow.location.href =
+        `${API_URL}/jupyter/open?notebook_type=${notebookType}`;
     } catch (cause) {
       notebookWindow.close();
       setError(
@@ -75,7 +80,7 @@ export default function OpenJupyterForm({
           <p>{error}</p>
           <p style={{ marginTop: "0.25rem" }}>
             <a
-              href={`${API_URL}/jupyter/open`}
+              href={`${API_URL}/jupyter/open?notebook_type=${notebookType}`}
               target="_blank"
               rel="noreferrer"
               style={{ textDecoration: "underline", color: "inherit", fontWeight: 600 }}

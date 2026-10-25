@@ -12,6 +12,25 @@ for the frontend extension.
 
 - JupyterLab >= 4.0.0
 
+## Notebook modes
+
+Use **File → New → ModelMind Notebook** for the full ML Studio workflow.
+Choose **File → New → Trainer Notebook** for a teaching-focused workflow:
+ML Studio keeps code preview available but hides code copy and insertion
+actions. Existing notebooks without a saved notebook mode continue to use the
+full ModelMind workflow.
+
+## ML Studio preprocessing
+
+The Preprocessing tab offers separate Basic, Medium, and Advanced examples:
+simple missing-value filling, pandas-based filling and encoding, and
+scikit-learn pipelines with a `ColumnTransformer`. The **Why** explanation is
+based on observed feature statistics such as skewness, IQR-flagged outliers,
+discrete/count-like values, missingness, and categorical cardinality. It
+describes method trade-offs and does not claim that a CSV reveals why values
+are missing or proves a recommendation is optimal. In particular, IQR flags
+are not proof of bad data, and ordinal codes may imply an artificial order.
+
 ## Fast hyperparameter tuning
 
 After a successful Model Advisor evaluation, ModelMind Studio can optionally

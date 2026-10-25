@@ -49,9 +49,6 @@ from .preprocessing_apply import (
     apply_preprocessing,
     undo_preprocessing,
 )
-from .ml_mistake_detector import (
-    analyze_ml_mistakes,
-)
 from .dataset_intelligence import (
     analyze_error_for_tutor,
 )
@@ -109,10 +106,10 @@ class GeminiAPIKeyHandler(APIHandler):
         try:
             stored_key = get_stored_gemini_api_key()
         except Exception:
-            # Keychain is locked or denied – treat as "no stored key" so the
-            # UI stays responsive. The user can enter their API key via the UI.
-            self.log.debug("Keychain inaccessible; treating as no stored key.")
-            stored_key = None
+            self.log.exception("Could not read the operating-system credential store.")
+            self.set_status(503)
+            self.finish(json.dumps({"error": "The system credential store is unavailable."}))
+            return
 
         source = "desktop" if stored_key else "environment" if environment_key else None
         self.finish(json.dumps({"configured": bool(environment_key or stored_key), "source": source}))
@@ -832,33 +829,6 @@ class PreprocessingUndoHandler(APIHandler):
 
 
 # =========================================================
-# ML MISTAKE DETECTOR HANDLER
-# =========================================================
-
-class MLMistakeCheckHandler(APIHandler):
-    @tornado.web.authenticated
-    def post(self):
-        self.set_header("Content-Type", "application/json")
-        try:
-            payload = json.loads(self.request.body)
-            code = str(payload.get("code", ""))[:50000]
-            level = str(payload.get("level", "Basic"))[:30]
-        except (json.JSONDecodeError, ValueError) as exc:
-            self.set_status(400)
-            self.finish(json.dumps({"error": str(exc)}))
-            return
-
-        try:
-            result = analyze_ml_mistakes(code=code, level=level)
-        except Exception as exc:
-            self.set_status(500)
-            self.finish(json.dumps({"error": f"ML check failed: {str(exc)}"}))
-            return
-
-        self.finish(json.dumps(result))
-
-
-# =========================================================
 # AI CHATBOT HANDLER
 # =========================================================
 
@@ -1226,7 +1196,6 @@ def setup_route_handlers(web_app):
     preprocessing_preview_route_pattern = url_path_join(base_url, "api", "dataset", "preprocessing", "preview")
     preprocessing_apply_route_pattern = url_path_join(base_url, "api", "dataset", "preprocessing", "apply")
     preprocessing_undo_route_pattern = url_path_join(base_url, "api", "dataset", "preprocessing", "undo")
-    ml_check_route_pattern = url_path_join(base_url, "api", "ai", "ml-check")
     debugger_tutor_route_pattern = url_path_join(base_url, "api", "ai", "tutor")
     ai_chat_route_pattern = url_path_join(base_url, "api", "ai", "chat")
     model_recommend_route_pattern = url_path_join(base_url, "api", "dataset", "model-recommend")
@@ -1295,7 +1264,6 @@ def setup_route_handlers(web_app):
         (preprocessing_preview_route_pattern, PreprocessingPreviewHandler),
         (preprocessing_apply_route_pattern, PreprocessingApplyHandler),
         (preprocessing_undo_route_pattern, PreprocessingUndoHandler),
-        (ml_check_route_pattern, MLMistakeCheckHandler),
         (debugger_tutor_route_pattern, DebuggerTutorHandler),
         (ai_chat_route_pattern, AIChatHandler),
         (model_recommend_route_pattern, ModelRecommendHandler),

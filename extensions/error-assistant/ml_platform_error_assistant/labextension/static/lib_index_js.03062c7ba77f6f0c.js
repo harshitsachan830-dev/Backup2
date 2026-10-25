@@ -31,6 +31,72 @@ function parseCodeBlocks(text) {
     }
     return { segments };
 }
+function escapeChatHtml(value) {
+    return value
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+function renderInlineMarkdown(value) {
+    return escapeChatHtml(value)
+        .replace(/`([^`]+)`/g, '<code class="mm-chat-inline-code">$1</code>')
+        .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+        .replace(/(^|[^*])\*([^*\n]+)\*(?!\*)/g, '$1<em>$2</em>');
+}
+function renderTextMarkdown(wrapper, content) {
+    const lines = content.replace(/\r/g, '').split('\n');
+    let paragraph = [];
+    const flushParagraph = () => {
+        if (!paragraph.length)
+            return;
+        const p = document.createElement('p');
+        p.className = 'mm-chat-text-seg';
+        p.innerHTML = paragraph.map(renderInlineMarkdown).join('<br>');
+        wrapper.appendChild(p);
+        paragraph = [];
+    };
+    for (let i = 0; i < lines.length;) {
+        const line = lines[i];
+        const heading = line.match(/^\s{0,3}(#{1,3})\s+(.+?)\s*#*\s*$/);
+        if (heading) {
+            flushParagraph();
+            const title = document.createElement(heading[1].length === 1 ? 'h2' : 'h3');
+            title.className = 'mm-chat-heading';
+            title.innerHTML = renderInlineMarkdown(heading[2]);
+            wrapper.appendChild(title);
+            i++;
+            continue;
+        }
+        const unordered = line.match(/^\s*[-*+]\s+(.+)$/);
+        const ordered = line.match(/^\s*\d+[.)]\s+(.+)$/);
+        if (unordered || ordered) {
+            flushParagraph();
+            const list = document.createElement(ordered ? 'ol' : 'ul');
+            list.className = 'mm-chat-list';
+            while (i < lines.length) {
+                const item = lines[i].match(ordered ? /^\s*\d+[.)]\s+(.+)$/ : /^\s*[-*+]\s+(.+)$/);
+                if (!item)
+                    break;
+                const li = document.createElement('li');
+                li.innerHTML = renderInlineMarkdown(item[1]);
+                list.appendChild(li);
+                i++;
+            }
+            wrapper.appendChild(list);
+            continue;
+        }
+        if (!line.trim()) {
+            flushParagraph();
+            i++;
+            continue;
+        }
+        paragraph.push(line);
+        i++;
+    }
+    flushParagraph();
+}
 function renderMessageContent(text) {
     const wrapper = document.createElement('div');
     wrapper.className = 'mm-chat-msg-content';
@@ -64,25 +130,41 @@ function renderMessageContent(text) {
             codeWrap.append(codeLang, pre);
             wrapper.appendChild(codeWrap);
         }
-        else {
-            // Render text with basic markdown (bold, inline code)
-            const p = document.createElement('div');
-            p.className = 'mm-chat-text-seg';
-            // Convert **bold**, *italic*, `inline code`
-            p.innerHTML = seg.content
-                .replace(/&/g, '&amp;')
-                .replace(/</g, '&lt;')
-                .replace(/>/g, '&gt;')
-                .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-                .replace(/\*(.+?)\*/g, '<em>$1</em>')
-                .replace(/`([^`]+)`/g, '<code class="mm-chat-inline-code">$1</code>')
-                .replace(/\n/g, '<br>');
-            wrapper.appendChild(p);
-        }
+        else
+            renderTextMarkdown(wrapper, seg.content);
     });
     return wrapper;
 }
-function createMessageBubble(msg) {
+async function streamAssistantReplyInPlace(messageElement, reply, messagesArea) {
+    var _a;
+    const bubble = messageElement.querySelector('.mm-chat-bubble');
+    if (!(bubble instanceof HTMLElement))
+        return false;
+    const characters = Array.from(reply);
+    if (!characters.length)
+        return true;
+    const steps = Math.min(220, Math.max(30, Math.ceil(characters.length / 10)));
+    const chunkSize = Math.max(1, Math.ceil(characters.length / steps));
+    const totalDuration = Math.min(8000, Math.max(900, characters.length * 2.5));
+    const delay = totalDuration / Math.ceil(characters.length / chunkSize);
+    bubble.classList.remove('mm-chat-bubble-streaming');
+    for (let index = 0; index < characters.length; index += chunkSize) {
+        if (!messageElement.isConnected)
+            return false;
+        const visibleText = characters.slice(0, index + chunkSize).join('');
+        const openCodeFence = (((_a = visibleText.match(/```/g)) !== null && _a !== void 0 ? _a : []).length % 2) === 1;
+        const displayText = openCodeFence ? `${visibleText}\n\`\`\`` : visibleText;
+        const content = renderMessageContent(displayText);
+        const cursor = document.createElement('span');
+        cursor.className = 'mm-chat-stream-cursor';
+        cursor.setAttribute('aria-hidden', 'true');
+        bubble.replaceChildren(content, cursor);
+        messagesArea.scrollTop = messagesArea.scrollHeight;
+        await new Promise(resolve => window.setTimeout(resolve, delay));
+    }
+    return messageElement.isConnected;
+}
+function createMessageBubble(msg, runCodeTrace, getActiveCode, loadDecisionTrees, loadNeuralNetworks, trainModel) {
     const wrapper = document.createElement('div');
     wrapper.className = `mm-chat-msg mm-chat-msg-${msg.role}`;
     const avatar = document.createElement('div');
@@ -122,6 +204,19 @@ function createMessageBubble(msg) {
     else {
         const content = renderMessageContent(msg.content);
         bubble.appendChild(content);
+        if (msg.datasetProfile)
+            bubble.appendChild(renderDatasetProfile(msg.datasetProfile));
+        if (msg.codeProfile)
+            bubble.appendChild(renderCodeProfile(msg.codeProfile));
+        if (msg.animationCode && runCodeTrace && getActiveCode) {
+            bubble.appendChild(renderCodeAnimation(msg.animationCode, runCodeTrace, getActiveCode, msg.animationUsesActiveCell !== false));
+        }
+        if (msg.decisionTrees)
+            bubble.appendChild(renderDecisionTrees(msg.decisionTrees));
+        if (msg.neuralNetworks)
+            bubble.appendChild(renderNeuralNetworks(msg.neuralNetworks));
+        if (msg.trainingSources)
+            bubble.appendChild(renderTrainingWorkflow(msg.trainingSources, trainModel));
     }
     container.append(metaHeader, bubble);
     if (msg.role === 'user') {
@@ -131,6 +226,825 @@ function createMessageBubble(msg) {
         wrapper.append(avatar, container);
     }
     return wrapper;
+}
+function renderTrainingWorkflow(sources, trainModel) {
+    const card = document.createElement('section');
+    card.style.cssText = 'margin-top:10px;padding:12px;border:1px solid #dbe3ef;border-radius:10px;background:#fff;color:#243247';
+    const heading = document.createElement('strong');
+    heading.textContent = '🏋 Train a model in this notebook';
+    const note = document.createElement('div');
+    note.style.cssText = 'font-size:11px;color:#64748b;margin:5px 0 9px';
+    note.textContent = 'Training runs in the active local Python kernel. Use numeric or already encoded features.';
+    card.append(heading, note);
+    if (!sources.length) {
+        const empty = document.createElement('div');
+        empty.style.cssText = 'padding:10px;border-radius:7px;background:#f8fafc;color:#475569;font-size:12px';
+        empty.textContent = 'I could not find a usable feature/target pair. Define X_train and y_train (optionally X_test and y_test), or X and y, then try again.';
+        card.appendChild(empty);
+        return card;
+    }
+    const controls = document.createElement('div');
+    controls.style.cssText = 'display:flex;flex-wrap:wrap;align-items:center;gap:7px';
+    const sourceSelect = document.createElement('select');
+    sourceSelect.setAttribute('aria-label', 'Training data source');
+    sourceSelect.style.cssText = 'max-width:260px;padding:6px;border:1px solid #cbd5e1;border-radius:6px;background:#fff;color:#243247';
+    sources.forEach((source, index) => {
+        const option = document.createElement('option');
+        option.value = source.id;
+        option.textContent = `${source.featuresName} + ${source.targetName} · ${source.rows} rows · ${source.featureCount} features`;
+        if (index === 0)
+            option.selected = true;
+        sourceSelect.appendChild(option);
+    });
+    const modelSelect = document.createElement('select');
+    modelSelect.setAttribute('aria-label', 'Model type to train');
+    modelSelect.style.cssText = 'padding:6px;border:1px solid #cbd5e1;border-radius:6px;background:#fff;color:#243247';
+    [
+        ['decision_tree', 'Decision Tree'],
+        ['random_forest', 'Random Forest'],
+        ['neural_network', 'Neural Network (MLP)']
+    ].forEach(([value, label]) => {
+        const option = document.createElement('option');
+        option.value = value;
+        option.textContent = label;
+        modelSelect.appendChild(option);
+    });
+    const trainButton = document.createElement('button');
+    trainButton.type = 'button';
+    trainButton.textContent = '▶ Train locally';
+    trainButton.style.cssText = 'padding:6px 10px;border:1px solid #c7d2fe;border-radius:6px;background:#eef2ff;color:#3730a3;cursor:pointer;font-weight:600';
+    controls.append(sourceSelect, modelSelect, trainButton);
+    const status = document.createElement('div');
+    status.style.cssText = 'font-size:11px;color:#475569;margin-top:8px';
+    status.textContent = 'Task type is detected from the target. A holdout split is used when a test set is not already available.';
+    card.append(controls, status);
+    trainButton.addEventListener('click', async () => {
+        if (!trainModel)
+            return;
+        trainButton.disabled = true;
+        trainButton.textContent = '⏳ Training…';
+        status.textContent = 'Training and evaluating the model in the notebook kernel…';
+        try {
+            const result = await trainModel(sourceSelect.value, modelSelect.value);
+            const secondary = result.secondaryMetrics.map(metric => `${metric.label}: ${metric.value.toFixed(4)}`).join(' · ');
+            status.textContent = `${result.modelType} ${result.task} trained locally as ${result.modelName}. ${result.primaryMetric}: ${result.primaryScore.toFixed(4)}${secondary ? ` · ${secondary}` : ''} · ${result.trainRows} train / ${result.testRows} test rows · ${result.featureCount} features. Use Visualize Tree or Visualize Neural Network to inspect supported fitted models.`;
+            status.style.color = '#166534';
+        }
+        catch (error) {
+            status.textContent = error instanceof Error ? error.message : 'Training failed in the notebook kernel.';
+            status.style.color = '#b91c1c';
+        }
+        finally {
+            trainButton.disabled = false;
+            trainButton.textContent = '▶ Train locally';
+        }
+    });
+    return card;
+}
+function renderNeuralNetworks(networks) {
+    const card = document.createElement('section');
+    card.style.cssText = 'margin-top:10px;padding:12px;border:1px solid #dbe3ef;border-radius:10px;background:#fff;color:#243247';
+    if (!networks.length) {
+        card.textContent = 'No fitted scikit-learn MLP neural network was found in the current notebook kernel. Fit an MLPClassifier or MLPRegressor, then try again.';
+        return card;
+    }
+    const heading = document.createElement('strong');
+    heading.textContent = '🧠 Fitted neural network';
+    const controls = document.createElement('div');
+    controls.style.cssText = 'display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:8px 0';
+    const modelSelect = document.createElement('select');
+    modelSelect.setAttribute('aria-label', 'Choose fitted neural network');
+    modelSelect.style.cssText = 'max-width:240px;padding:5px;border:1px solid #cbd5e1;border-radius:6px;background:#fff;color:#243247';
+    networks.forEach((network, index) => {
+        const option = document.createElement('option');
+        option.value = String(index);
+        option.textContent = `${network.modelName} · ${network.task}`;
+        modelSelect.appendChild(option);
+    });
+    const playButton = document.createElement('button');
+    playButton.type = 'button';
+    playButton.textContent = '▶ Play';
+    playButton.setAttribute('aria-label', 'Play neural network flow animation');
+    playButton.style.cssText = 'padding:5px 10px;border:1px solid #cbd5e1;border-radius:6px;background:#fff;color:#243247;cursor:pointer;font-weight:600';
+    const speedSelect = document.createElement('select');
+    speedSelect.setAttribute('aria-label', 'Neural network animation speed');
+    speedSelect.style.cssText = 'padding:5px;border:1px solid #cbd5e1;border-radius:6px;background:#fff;color:#243247';
+    [1, 2, 3, 4].forEach(speed => {
+        const option = document.createElement('option');
+        option.value = String(speed);
+        option.textContent = `${speed}×`;
+        speedSelect.appendChild(option);
+    });
+    const strengthLabel = document.createElement('label');
+    strengthLabel.style.cssText = 'display:flex;align-items:center;gap:6px;font-size:11px;color:#475569';
+    strengthLabel.append(document.createTextNode('Hide weak weights '));
+    const strength = document.createElement('input');
+    strength.type = 'range';
+    strength.min = '0';
+    strength.max = '100';
+    strength.value = '0';
+    strength.setAttribute('aria-label', 'Hide weak neural network weights');
+    const strengthText = document.createElement('span');
+    strengthLabel.append(strength, strengthText);
+    controls.append(modelSelect, playButton, speedSelect, strengthLabel);
+    const summary = document.createElement('div');
+    summary.style.cssText = 'font-size:11px;line-height:1.6;color:#475569;margin:6px 0';
+    const diagram = document.createElement('div');
+    diagram.style.cssText = 'max-height:470px;overflow:auto;border:1px solid #edf1f6;border-radius:8px;background:#f8fafc';
+    const legend = document.createElement('div');
+    legend.style.cssText = 'font-size:10px;color:#64748b;margin-top:6px';
+    const animationStatus = document.createElement('div');
+    animationStatus.style.cssText = 'font-size:10px;color:#64748b;min-height:14px;margin:3px 0';
+    card.append(heading, controls, summary, animationStatus, diagram, legend);
+    let animationTimer = null;
+    let isPlaying = false;
+    let activeLayer = -1;
+    let renderedEdges = [];
+    let renderedNodes = [];
+    const paintAnimationFrame = () => {
+        var _a, _b, _c, _d, _e;
+        renderedEdges.forEach(edge => {
+            const active = edge.layer === activeLayer;
+            edge.element.setAttribute('stroke', active ? '#f59e0b' : edge.stroke);
+            edge.element.setAttribute('stroke-width', active ? '3.5' : edge.width);
+            edge.element.setAttribute('stroke-opacity', active ? '0.95' : edge.opacity);
+        });
+        renderedNodes.forEach(node => {
+            const active = node.layer === activeLayer || node.layer === activeLayer + 1;
+            node.element.setAttribute('fill', active ? '#fef3c7' : node.fill);
+            node.element.setAttribute('stroke', active ? '#f59e0b' : node.stroke);
+        });
+        const network = (_a = networks[Number(modelSelect.value)]) !== null && _a !== void 0 ? _a : networks[0];
+        animationStatus.textContent = activeLayer >= 0
+            ? `${isPlaying ? 'Playing' : 'Paused'} · ${(_c = (_b = network.layers[activeLayer]) === null || _b === void 0 ? void 0 : _b.label) !== null && _c !== void 0 ? _c : 'Layer'} → ${(_e = (_d = network.layers[activeLayer + 1]) === null || _d === void 0 ? void 0 : _d.label) !== null && _e !== void 0 ? _e : 'Output'} · illustrative, not a specific prediction`
+            : 'Ready · animation highlights the layer-by-layer flow; it does not calculate a sample prediction.';
+    };
+    const stopAnimation = (reset = true) => {
+        if (animationTimer !== null)
+            window.clearInterval(animationTimer);
+        animationTimer = null;
+        isPlaying = false;
+        playButton.textContent = '▶ Play';
+        playButton.setAttribute('aria-label', 'Play neural network flow animation');
+        if (reset)
+            activeLayer = -1;
+        paintAnimationFrame();
+    };
+    const advanceAnimation = () => {
+        var _a;
+        const network = (_a = networks[Number(modelSelect.value)]) !== null && _a !== void 0 ? _a : networks[0];
+        const transitions = Math.max(1, network.layers.length - 1);
+        activeLayer = (activeLayer + 1) % transitions;
+        paintAnimationFrame();
+    };
+    const startAnimation = () => {
+        if (animationTimer !== null)
+            window.clearInterval(animationTimer);
+        isPlaying = true;
+        playButton.textContent = '⏸ Pause';
+        playButton.setAttribute('aria-label', 'Pause neural network flow animation');
+        advanceAnimation();
+        const delay = 1200 / Number(speedSelect.value);
+        animationTimer = window.setInterval(() => {
+            if (!card.isConnected) {
+                stopAnimation();
+                return;
+            }
+            advanceAnimation();
+        }, delay);
+    };
+    playButton.addEventListener('click', () => isPlaying ? stopAnimation(false) : startAnimation());
+    speedSelect.addEventListener('change', () => { if (isPlaying)
+        startAnimation(); });
+    modelSelect.addEventListener('change', () => { stopAnimation(); render(); });
+    const render = () => {
+        var _a;
+        const network = (_a = networks[Number(modelSelect.value)]) !== null && _a !== void 0 ? _a : networks[0];
+        const maxWeight = Math.max(0, ...network.connections.map(connection => Math.abs(connection.weight)));
+        const minWeight = maxWeight * Number(strength.value) / 100;
+        const shownEdges = network.connections.filter(connection => Math.abs(connection.weight) >= minWeight);
+        const layerGap = 132;
+        const width = Math.max(720, 100 + (network.layers.length - 1) * layerGap);
+        const height = 430;
+        const xAt = (layerIndex) => 48 + layerIndex * layerGap;
+        const pointAt = new Map();
+        renderedEdges = [];
+        renderedNodes = [];
+        network.layers.forEach((layer, layerIndex) => {
+            const count = Math.max(1, layer.nodes.length);
+            layer.nodes.forEach((node, nodeIndex) => {
+                pointAt.set(`${layerIndex}:${node.index}`, {
+                    x: xAt(layerIndex),
+                    y: 70 + ((nodeIndex + 1) * (height - 130)) / (count + 1)
+                });
+            });
+        });
+        const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
+        svg.setAttribute('width', String(width));
+        svg.setAttribute('height', String(height));
+        svg.setAttribute('role', 'img');
+        svg.setAttribute('aria-label', `${network.modelType} neural network with layer sizes ${network.layers.map(layer => layer.size).join(', ')}`);
+        shownEdges.forEach(connection => {
+            var _a, _b, _c;
+            const from = pointAt.get(`${connection.fromLayer}:${connection.fromNode}`);
+            const to = pointAt.get(`${connection.fromLayer + 1}:${connection.toNode}`);
+            if (!from || !to)
+                return;
+            const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+            line.setAttribute('x1', String(from.x));
+            line.setAttribute('y1', String(from.y));
+            line.setAttribute('x2', String(to.x));
+            line.setAttribute('y2', String(to.y));
+            line.setAttribute('stroke', connection.weight >= 0 ? '#2563eb' : '#dc2626');
+            line.setAttribute('stroke-width', String(0.7 + 1.8 * Math.abs(connection.weight) / (maxWeight || 1)));
+            line.setAttribute('stroke-opacity', String(0.12 + 0.65 * Math.abs(connection.weight) / (maxWeight || 1)));
+            renderedEdges.push({
+                element: line,
+                layer: connection.fromLayer,
+                stroke: (_a = line.getAttribute('stroke')) !== null && _a !== void 0 ? _a : '#2563eb',
+                width: (_b = line.getAttribute('stroke-width')) !== null && _b !== void 0 ? _b : '1',
+                opacity: (_c = line.getAttribute('stroke-opacity')) !== null && _c !== void 0 ? _c : '0.5'
+            });
+            const title = document.createElementNS(svg.namespaceURI, 'title');
+            title.textContent = `Weight ${connection.weight.toFixed(4)}`;
+            line.appendChild(title);
+            svg.appendChild(line);
+        });
+        network.layers.forEach((layer, layerIndex) => {
+            const title = document.createElementNS(svg.namespaceURI, 'text');
+            title.setAttribute('x', String(xAt(layerIndex)));
+            title.setAttribute('y', '24');
+            title.setAttribute('text-anchor', 'middle');
+            title.setAttribute('font-size', '12');
+            title.setAttribute('font-weight', '700');
+            title.setAttribute('fill', '#334155');
+            title.textContent = layer.label;
+            svg.appendChild(title);
+            const countLabel = document.createElementNS(svg.namespaceURI, 'text');
+            countLabel.setAttribute('x', String(xAt(layerIndex)));
+            countLabel.setAttribute('y', '42');
+            countLabel.setAttribute('text-anchor', 'middle');
+            countLabel.setAttribute('font-size', '10');
+            countLabel.setAttribute('fill', '#64748b');
+            countLabel.textContent = `${layer.size} units`;
+            if (layer.nodes.length < layer.size)
+                countLabel.textContent += ` · showing ${layer.nodes.length}`;
+            svg.appendChild(countLabel);
+            layer.nodes.forEach(node => {
+                var _a, _b;
+                const point = pointAt.get(`${layerIndex}:${node.index}`);
+                if (!point)
+                    return;
+                const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+                circle.setAttribute('cx', String(point.x));
+                circle.setAttribute('cy', String(point.y));
+                circle.setAttribute('r', '13');
+                circle.setAttribute('fill', layerIndex === 0 ? '#dbeafe' : layerIndex === network.layers.length - 1 ? '#dcfce7' : '#ede9fe');
+                circle.setAttribute('stroke', layerIndex === 0 ? '#3b82f6' : layerIndex === network.layers.length - 1 ? '#22c55e' : '#8b5cf6');
+                circle.setAttribute('stroke-width', '2');
+                renderedNodes.push({
+                    element: circle,
+                    layer: layerIndex,
+                    fill: (_a = circle.getAttribute('fill')) !== null && _a !== void 0 ? _a : '#ede9fe',
+                    stroke: (_b = circle.getAttribute('stroke')) !== null && _b !== void 0 ? _b : '#8b5cf6'
+                });
+                const nodeTitle = document.createElementNS(svg.namespaceURI, 'title');
+                nodeTitle.textContent = node.label;
+                circle.appendChild(nodeTitle);
+                svg.appendChild(circle);
+                const label = document.createElementNS(svg.namespaceURI, 'text');
+                label.setAttribute('x', String(point.x));
+                label.setAttribute('y', String(point.y + 27));
+                label.setAttribute('text-anchor', 'middle');
+                label.setAttribute('font-size', '9');
+                label.setAttribute('fill', '#475569');
+                label.textContent = node.label.length > 15 ? `${node.label.slice(0, 13)}…` : node.label;
+                svg.appendChild(label);
+            });
+        });
+        diagram.replaceChildren(svg);
+        strengthText.textContent = `${Number(strength.value)}% · ${shownEdges.length}/${network.connections.length} links`;
+        summary.textContent = `${network.modelType} · ${network.task} · layers ${network.layers.map(layer => layer.size).join(' → ')} · hidden activation ${network.activation} · output ${network.outputActivation} · loss ${network.loss} · ${network.epochs} training iterations`;
+        legend.textContent = `Blue links have positive weights; red links have negative weights. Line thickness shows absolute weight. Gold highlights the current animation step. Hover a link or neuron for its value. ${network.classes.length ? `Classes: ${network.classes.join(', ')}.` : ''} Showing a representative subset of neurons when a layer exceeds 12 units.`;
+        paintAnimationFrame();
+    };
+    strength.addEventListener('input', render);
+    render();
+    return card;
+}
+function renderDecisionTrees(trees) {
+    const card = document.createElement('section');
+    card.style.cssText = 'margin-top:10px;padding:12px;border:1px solid #dbe3ef;border-radius:10px;background:#fff;color:#243247';
+    if (!trees.length) {
+        card.textContent = 'No fitted scikit-learn decision tree was found in the current notebook kernel. Fit a DecisionTreeClassifier or DecisionTreeRegressor, then try again.';
+        return card;
+    }
+    const heading = document.createElement('strong');
+    heading.textContent = '🌳 Fitted decision tree';
+    const controls = document.createElement('div');
+    controls.style.cssText = 'display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:8px 0';
+    const modelSelect = document.createElement('select');
+    modelSelect.setAttribute('aria-label', 'Choose fitted decision tree');
+    modelSelect.style.cssText = 'max-width:220px;padding:5px;border:1px solid #cbd5e1;border-radius:6px;background:#fff;color:#243247';
+    trees.forEach((tree, index) => {
+        const option = document.createElement('option');
+        option.value = String(index);
+        option.textContent = `${tree.modelName} · ${tree.task}`;
+        modelSelect.appendChild(option);
+    });
+    const depthWrap = document.createElement('label');
+    depthWrap.style.cssText = 'display:flex;align-items:center;gap:6px;font-size:11px;color:#475569';
+    const depthText = document.createElement('span');
+    const depthInput = document.createElement('input');
+    depthInput.type = 'range';
+    depthInput.min = '1';
+    depthInput.max = '10';
+    depthInput.value = '3';
+    depthInput.setAttribute('aria-label', 'Maximum tree depth shown');
+    const diagram = document.createElement('div');
+    diagram.style.cssText = 'max-height:440px;overflow:auto;border:1px solid #edf1f6;border-radius:8px;background:#f8fafc';
+    const caption = document.createElement('div');
+    caption.style.cssText = 'font-size:10px;color:#64748b;margin-top:6px';
+    depthWrap.append(document.createTextNode('Visible depth '), depthInput, depthText);
+    controls.append(modelSelect, depthWrap);
+    const render = () => {
+        var _a;
+        const tree = (_a = trees[Number(modelSelect.value)]) !== null && _a !== void 0 ? _a : trees[0];
+        const maxVisibleDepth = Math.max(1, Math.min(10, tree.maxDepth));
+        depthInput.max = String(maxVisibleDepth);
+        depthInput.value = String(Math.max(1, Math.min(Number(depthInput.value), maxVisibleDepth)));
+        const shownDepth = Math.min(Number(depthInput.value), tree.maxDepth);
+        depthText.textContent = `${shownDepth} / ${tree.maxDepth}`;
+        const visible = tree.nodes.filter(node => node.depth <= shownDepth);
+        const levels = [];
+        visible.forEach(node => { var _a; var _b; return ((_a = levels[_b = node.depth]) !== null && _a !== void 0 ? _a : (levels[_b] = [])).push(node); });
+        const widest = Math.max(1, ...levels.map(level => { var _a; return (_a = level === null || level === void 0 ? void 0 : level.length) !== null && _a !== void 0 ? _a : 0; }));
+        const nodeWidth = 184, nodeHeight = 76, gapX = 26, gapY = 42;
+        const width = Math.max(680, widest * (nodeWidth + gapX) + gapX);
+        const height = Math.max(150, (shownDepth + 1) * (nodeHeight + gapY) + gapY);
+        const positions = new Map();
+        levels.forEach((level, depth) => level === null || level === void 0 ? void 0 : level.forEach((node, index) => {
+            const x = ((index + 1) * width) / (level.length + 1);
+            positions.set(node.id, { x, y: gapY / 2 + depth * (nodeHeight + gapY) });
+        }));
+        const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
+        svg.setAttribute('width', String(width));
+        svg.setAttribute('height', String(height));
+        svg.setAttribute('role', 'img');
+        svg.setAttribute('aria-label', `${tree.task} tree with ${tree.nodeCount} nodes`);
+        visible.forEach(node => {
+            const parent = positions.get(node.id);
+            if (!parent)
+                return;
+            [['left', '≤'], ['right', '>']].forEach(([side, label]) => {
+                const childId = node[side];
+                const child = childId === null ? undefined : positions.get(childId);
+                if (!child)
+                    return;
+                const line = document.createElementNS(svg.namespaceURI, 'line');
+                line.setAttribute('x1', String(parent.x));
+                line.setAttribute('y1', String(parent.y + nodeHeight));
+                line.setAttribute('x2', String(child.x));
+                line.setAttribute('y2', String(child.y));
+                line.setAttribute('stroke', '#94a3b8');
+                line.setAttribute('stroke-width', '2');
+                svg.appendChild(line);
+                const branch = document.createElementNS(svg.namespaceURI, 'text');
+                branch.setAttribute('x', String((parent.x + child.x) / 2));
+                branch.setAttribute('y', String((parent.y + nodeHeight + child.y) / 2));
+                branch.setAttribute('text-anchor', 'middle');
+                branch.setAttribute('font-size', '11');
+                branch.setAttribute('fill', '#475569');
+                branch.textContent = label;
+                svg.appendChild(branch);
+            });
+        });
+        visible.forEach(node => {
+            const point = positions.get(node.id);
+            if (!point)
+                return;
+            const isLeaf = node.left === null && node.right === null;
+            const group = document.createElementNS(svg.namespaceURI, 'g');
+            const rect = document.createElementNS(svg.namespaceURI, 'rect');
+            rect.setAttribute('x', String(point.x - nodeWidth / 2));
+            rect.setAttribute('y', String(point.y));
+            rect.setAttribute('width', String(nodeWidth));
+            rect.setAttribute('height', String(nodeHeight));
+            rect.setAttribute('rx', '9');
+            rect.setAttribute('fill', isLeaf ? '#ecfdf5' : '#eef2ff');
+            rect.setAttribute('stroke', isLeaf ? '#86efac' : '#a5b4fc');
+            rect.setAttribute('stroke-width', '1.5');
+            group.appendChild(rect);
+            const title = document.createElementNS(svg.namespaceURI, 'title');
+            title.textContent = isLeaf ? `Leaf: ${node.prediction}` : `${node.feature} ≤ ${node.threshold}`;
+            group.appendChild(title);
+            const addText = (text, y, bold = false) => {
+                const label = document.createElementNS(svg.namespaceURI, 'text');
+                label.setAttribute('x', String(point.x));
+                label.setAttribute('y', String(point.y + y));
+                label.setAttribute('text-anchor', 'middle');
+                label.setAttribute('font-size', bold ? '12' : '10');
+                label.setAttribute('font-weight', bold ? '700' : '400');
+                label.setAttribute('fill', '#1e293b');
+                label.textContent = text;
+                group.appendChild(label);
+            };
+            const rule = isLeaf ? `Predict: ${node.prediction}` : `${node.feature} ≤ ${node.threshold}`;
+            addText(rule.length > 27 ? `${rule.slice(0, 24)}…` : rule, 23, true);
+            addText(`samples ${node.samples} · ${tree.task === 'classification' ? 'gini' : 'impurity'} ${node.impurity.toPrecision(3)}`, 43);
+            addText(`node ${node.id}`, 62);
+            svg.appendChild(group);
+        });
+        diagram.replaceChildren(svg);
+        window.requestAnimationFrame(() => {
+            if (diagram.isConnected)
+                diagram.scrollLeft = Math.max(0, width / 2 - diagram.clientWidth / 2);
+        });
+        caption.textContent = `${tree.criterion} · ${tree.nodeCount} nodes · maximum depth ${tree.maxDepth}. Showing depth ${shownDepth}${tree.maxDepth > 10 ? ' (visualization capped at depth 10)' : ''}; scroll horizontally to inspect branches.`;
+    };
+    modelSelect.addEventListener('change', render);
+    depthInput.addEventListener('input', render);
+    card.append(heading, controls, diagram, caption);
+    render();
+    return card;
+}
+function renderCodeProfile(items) {
+    const card = document.createElement('section');
+    card.style.cssText = 'margin-top:10px;padding:10px 12px;border:1px solid #dbe3ef;border-radius:9px;background:#fff;color:#243247;font-size:11px';
+    const heading = document.createElement('strong');
+    heading.textContent = 'Code structure map';
+    card.appendChild(heading);
+    const note = document.createElement('div');
+    note.style.cssText = 'color:#607086;margin:3px 0 8px';
+    note.textContent = 'Counts of common Python constructs in the active cell (a quick overview, not an execution trace).';
+    card.appendChild(note);
+    const max = Math.max(1, ...items.map(x => x.count));
+    items.forEach(({ label, count }) => {
+        const row = document.createElement('div');
+        row.style.cssText = 'display:grid;grid-template-columns:86px 1fr 22px;gap:6px;align-items:center;margin:4px 0';
+        const name = document.createElement('span');
+        name.textContent = label;
+        const track = document.createElement('span');
+        track.style.cssText = 'height:8px;background:#eef0fa;border-radius:8px;overflow:hidden';
+        const fill = document.createElement('span');
+        fill.style.cssText = `display:block;height:100%;width:${Math.round(count * 100 / max)}%;background:#7367f0`;
+        track.appendChild(fill);
+        const value = document.createElement('span');
+        value.textContent = String(count);
+        row.append(name, track, value);
+        card.appendChild(row);
+    });
+    return card;
+}
+function summarizeCodeStructure(code) {
+    const patterns = [
+        ['Imports', /^\s*(?:import\s+|from\s+\S+\s+import\s+)/gm],
+        ['Functions', /^\s*(?:async\s+)?def\s+\w+/gm],
+        ['Classes', /^\s*class\s+\w+/gm],
+        ['Conditions', /^\s*(?:if|elif|else)\b/gm],
+        ['Loops', /^\s*(?:for|while|async\s+for)\b/gm],
+        ['Data operations', /\b(?:read_csv|groupby|merge|join|fit|predict|transform|plot|hist|bar)\s*\(/g],
+        ['Outputs', /\b(?:print|display|savefig|to_csv)\s*\(/g],
+    ];
+    return patterns.map(([label, pattern]) => { var _a; return ({ label, count: ((_a = code.match(pattern)) !== null && _a !== void 0 ? _a : []).length }); });
+}
+function explainSourceLine(line) {
+    const trimmed = line.trim();
+    if (!trimmed)
+        return 'Blank line — visual spacing only.';
+    if (trimmed.startsWith('#'))
+        return 'Comment — Python skips this line when executing the cell.';
+    if (/^(from\s+\S+\s+import|import)\b/.test(trimmed))
+        return 'Import — makes a module or selected names available to later lines.';
+    if (/^(for|while)\b/.test(trimmed))
+        return 'Loop header — the indented body runs for each item or while its condition is true.';
+    if (/^(if|elif|else|try|except|finally|with)\b/.test(trimmed))
+        return 'Control-flow line — which indented block runs depends on the runtime condition or outcome.';
+    if (/^(def|class|async\s+def)\b/.test(trimmed))
+        return 'Definition — creates a function or class; its body runs later when called or instantiated.';
+    if (/^return\b/.test(trimmed))
+        return 'Return — exits the current function and passes a value back to its caller.';
+    if (/^(print|display)\s*\(/.test(trimmed))
+        return 'Output — sends a value to the notebook output when this line runs.';
+    if (/^[\w.\[\]]+\s*([+\-*/]?=)/.test(trimmed))
+        return 'Assignment or update — evaluates the expression and stores its result in a name or location.';
+    return 'Statement — Python evaluates this line in order; its exact effect depends on the current values and program state.';
+}
+function renderCodeAnimation(source, runCodeTrace, getActiveCode, usesActiveCell) {
+    let currentSource = source;
+    let lines = currentSource.replace(/\r\n?/g, '\n').split('\n').slice(0, 250);
+    const root = document.createElement('section');
+    root.setAttribute('aria-label', 'Python execution trace');
+    root.style.cssText = 'margin-top:10px;padding:10px;border:1px solid #dbe3ef;border-radius:9px;background:#fff;color:#243247;font-size:12px';
+    const heading = document.createElement('strong');
+    heading.textContent = '▶ Python execution trace';
+    const note = document.createElement('div');
+    note.style.cssText = 'font-size:11px;color:#607086;margin:4px 0 8px';
+    note.textContent = usesActiveCell
+        ? 'Run & trace reads the currently selected notebook cell each time, then replays its executed lines and variable values.'
+        : 'Runs the uploaded code in the current kernel, then replays its executed lines and variable values.';
+    const controls = document.createElement('div');
+    controls.style.cssText = 'display:flex;align-items:center;gap:6px;margin-bottom:8px';
+    const makeButton = (label, title) => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.textContent = label;
+        button.title = title;
+        button.style.cssText = 'border:1px solid #dbe3ef;border-radius:6px;background:#f8fafc;padding:4px 8px;color:#243247;cursor:pointer';
+        return button;
+    };
+    const run = makeButton('▶ Run & trace', 'Run this code cell and capture its execution path');
+    run.style.background = '#eef2ff';
+    run.style.borderColor = '#c7d2fe';
+    run.style.color = '#4338ca';
+    const previous = makeButton('← Back', 'Previous executed line');
+    const toggle = makeButton('▶ Play', 'Play execution trace');
+    const next = makeButton('Next →', 'Next executed line');
+    const counter = document.createElement('span');
+    counter.style.cssText = 'margin-left:auto;font-size:11px;color:#607086';
+    controls.append(run, previous, toggle, next, counter);
+    const codePanel = document.createElement('div');
+    codePanel.style.cssText = 'max-height:260px;overflow:auto;border:1px solid #edf1f6;border-radius:6px;background:#0f172a;padding:6px 0;font:11px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace';
+    let renderedLines = [];
+    const renderSourceLines = () => {
+        lines = currentSource.replace(/\r\n?/g, '\n').split('\n').slice(0, 250);
+        renderedLines = lines.map((line, index) => {
+            const row = document.createElement('div');
+            row.dataset.line = String(index);
+            row.style.cssText = 'display:grid;grid-template-columns:36px minmax(0,1fr);padding:0 8px;color:#cbd5e1;white-space:pre;min-height:17px';
+            const number = document.createElement('span');
+            number.textContent = String(index + 1);
+            number.style.color = '#64748b';
+            const text = document.createElement('span');
+            text.textContent = line || ' ';
+            row.append(number, text);
+            return row;
+        });
+        codePanel.replaceChildren(...renderedLines);
+    };
+    renderSourceLines();
+    const explanation = document.createElement('div');
+    explanation.setAttribute('aria-live', 'polite');
+    explanation.style.cssText = 'font-size:11px;color:#475569;margin-top:7px;min-height:16px';
+    explanation.textContent = 'Run & trace captures the real path; loops can visit a line multiple times and untaken branches are skipped.';
+    const variablePanel = document.createElement('div');
+    variablePanel.style.cssText = 'display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:5px;margin-top:8px';
+    const outputPanel = document.createElement('pre');
+    outputPanel.style.cssText = 'display:none;max-height:120px;overflow:auto;white-space:pre-wrap;background:#f8fafc;border:1px solid #edf1f6;border-radius:6px;padding:7px;font:11px/1.4 ui-monospace,monospace;color:#334155';
+    let events = [];
+    let step = 0;
+    let timer;
+    const paint = () => {
+        var _a;
+        if (events.length === 0) {
+            counter.textContent = 'Run to capture execution';
+            return;
+        }
+        const active = events[step];
+        renderedLines.forEach(row => {
+            const selected = Number(row.dataset.line) === active.line - 1;
+            row.style.background = selected ? 'rgba(109,124,255,.28)' : 'transparent';
+            if (selected)
+                row.scrollIntoView({ block: 'nearest' });
+        });
+        counter.textContent = `Executed step ${step + 1} of ${events.length} · line ${active.line}${active.functionName !== '<module>' ? ` · ${active.functionName}()` : ''}`;
+        explanation.textContent = `At the start of this line: ${explainSourceLine((_a = lines[active.line - 1]) !== null && _a !== void 0 ? _a : '')}`;
+        variablePanel.replaceChildren();
+        const entries = Object.entries(active.variables);
+        if (entries.length === 0) {
+            const empty = document.createElement('span');
+            empty.textContent = 'No simple variable values at this step.';
+            empty.style.cssText = 'color:#64748b;font-size:11px';
+            variablePanel.appendChild(empty);
+        }
+        else
+            entries.forEach(([name, value]) => {
+                const chip = document.createElement('div');
+                chip.style.cssText = 'padding:5px 7px;border:1px solid #e2e8f0;border-radius:6px;background:#f8fafc;min-width:0';
+                const key = document.createElement('strong');
+                key.textContent = name;
+                key.style.cssText = 'display:block;color:#475569;font-size:10px';
+                const val = document.createElement('span');
+                val.textContent = value;
+                val.title = value;
+                val.style.cssText = 'display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font:11px ui-monospace,monospace;color:#0f172a';
+                chip.append(key, val);
+                variablePanel.appendChild(chip);
+            });
+    };
+    const stop = () => { if (timer)
+        clearInterval(timer); timer = undefined; toggle.textContent = '▶ Play'; toggle.title = 'Play execution trace'; };
+    const advance = () => { step = Math.min(step + 1, events.length - 1); paint(); };
+    previous.addEventListener('click', () => { stop(); step = Math.max(step - 1, 0); paint(); });
+    next.addEventListener('click', () => { stop(); advance(); });
+    toggle.addEventListener('click', () => {
+        if (timer) {
+            stop();
+            return;
+        }
+        if (events.length < 2 || step >= events.length - 1)
+            return;
+        toggle.textContent = '⏸ Pause';
+        toggle.title = 'Pause walkthrough';
+        timer = setInterval(() => {
+            if (!root.isConnected) {
+                stop();
+                return;
+            }
+            if (step >= events.length - 1) {
+                stop();
+                return;
+            }
+            step += 1;
+            paint();
+        }, 650);
+    });
+    run.addEventListener('click', async () => {
+        const latestSource = usesActiveCell ? getActiveCode().trim() : currentSource;
+        if (!latestSource) {
+            explanation.textContent = 'Select a code cell in the notebook, then run the trace again.';
+            return;
+        }
+        if (latestSource !== currentSource) {
+            currentSource = latestSource;
+            events = [];
+            step = 0;
+            renderSourceLines();
+            variablePanel.replaceChildren();
+            outputPanel.style.display = 'none';
+            counter.textContent = 'Selected cell changed · tracing the new code';
+        }
+        if (/\b(?:input|getpass)\s*\(/.test(latestSource)) {
+            explanation.textContent = 'This cell uses input(). Interactive prompts are not supported in trace mode yet; try a cell that does not ask for keyboard input.';
+            return;
+        }
+        const accepted = window.confirm('Run the currently selected code cell in its Jupyter kernel to capture the real execution path? It can change variables, show output, and repeat any file or network actions in the code.');
+        if (!accepted)
+            return;
+        run.disabled = true;
+        run.textContent = 'Tracing…';
+        explanation.textContent = 'Running the selected code and capturing executed lines…';
+        try {
+            const result = await runCodeTrace(latestSource);
+            events = result.events.slice(0, 1000);
+            step = 0;
+            outputPanel.style.display = result.output || result.error ? 'block' : 'none';
+            outputPanel.textContent = [result.output, result.error ? `Execution stopped: ${result.error}` : ''].filter(Boolean).join('\n');
+            explanation.textContent = result.error
+                ? `Captured ${events.length} executed steps before the cell stopped with an error.`
+                : `Captured ${events.length} executed steps. Repeated lines show loops; lines Python skipped do not appear.`;
+            if (events.length === 0)
+                explanation.textContent += ' No Python line events were captured.';
+            paint();
+        }
+        catch (error) {
+            explanation.textContent = error instanceof Error ? error.message : 'Could not capture this execution.';
+        }
+        finally {
+            run.disabled = false;
+            run.textContent = '↻ Run again';
+        }
+    });
+    root.append(heading, note, controls, codePanel, explanation, variablePanel, outputPanel);
+    counter.textContent = 'Run to capture execution';
+    if (lines.length >= 250) {
+        const limitNote = document.createElement('div');
+        limitNote.style.cssText = 'font-size:10px;color:#607086;margin-top:5px';
+        limitNote.textContent = 'Showing the first 250 lines.';
+        root.appendChild(limitNote);
+    }
+    return root;
+}
+function renderDatasetProfile(profile) {
+    const card = document.createElement('section');
+    card.style.cssText = 'margin-top:12px;padding:12px;border:1px solid #dbe3ef;border-radius:10px;background:#fff;color:#243247;font-size:12px';
+    const title = document.createElement('strong');
+    title.textContent = `${profile.filename} · ${profile.rows.toLocaleString()} rows × ${profile.totalColumns} columns`;
+    card.appendChild(title);
+    const meta = document.createElement('div');
+    meta.style.cssText = 'margin:5px 0 10px;color:#607086';
+    meta.textContent = `${profile.duplicateRows} duplicate rows in profiled rows · statistics use ${profile.profiledRows.toLocaleString()} of ${profile.rows.toLocaleString()} rows and ${profile.columns.length} of ${profile.totalColumns} columns`;
+    card.appendChild(meta);
+    profile.columns.forEach(col => {
+        const section = document.createElement('div');
+        section.style.cssText = 'padding:8px 0;border-top:1px solid #edf1f6';
+        const heading = document.createElement('div');
+        heading.style.cssText = 'font-weight:700;margin-bottom:3px';
+        heading.textContent = `${col.name} · ${col.type} · ${col.missing} missing · ${col.unique} unique`;
+        section.appendChild(heading);
+        if (col.type === 'numeric' && col.histogram) {
+            const summary = document.createElement('div');
+            summary.style.color = '#607086';
+            summary.textContent = `mean ${col.mean} · median ${col.median} · SD ${col.std} · skewness ${col.skewness} · range ${col.min}–${col.max} · IQR outliers ${col.outliers}`;
+            section.appendChild(summary);
+            const max = Math.max(1, ...col.histogram);
+            const chart = document.createElement('div');
+            chart.setAttribute('role', 'img');
+            chart.setAttribute('aria-label', `Histogram of ${col.name}`);
+            chart.style.cssText = 'height:68px;display:flex;align-items:flex-end;gap:3px;margin-top:8px;padding:0 2px';
+            col.histogram.forEach((count, i) => {
+                const bar = document.createElement('div');
+                bar.title = `Bin ${i + 1}: ${count} rows`;
+                bar.style.cssText = `flex:1;height:${Math.max(3, Math.round(58 * count / max))}px;background:#7367f0;border-radius:3px 3px 0 0`;
+                chart.appendChild(bar);
+            });
+            section.appendChild(chart);
+            const axis = document.createElement('div');
+            axis.style.cssText = 'display:flex;justify-content:space-between;color:#607086;font-size:10px';
+            axis.append(document.createTextNode(String(col.min)), document.createTextNode(String(col.max)));
+            section.appendChild(axis);
+        }
+        else if (col.categories) {
+            const chart = document.createElement('div');
+            chart.style.cssText = 'display:grid;gap:4px;margin-top:7px';
+            const max = Math.max(1, ...col.categories.map(x => x.count));
+            col.categories.slice(0, 8).forEach(({ label, count }) => {
+                const row = document.createElement('div');
+                row.style.cssText = 'display:grid;grid-template-columns:minmax(50px,1fr) 3fr auto;gap:6px;align-items:center';
+                const name = document.createElement('span');
+                name.textContent = label.slice(0, 30);
+                name.title = label;
+                const track = document.createElement('span');
+                track.style.cssText = 'height:7px;background:#eef0fa;border-radius:8px;overflow:hidden';
+                const fill = document.createElement('span');
+                fill.style.cssText = `display:block;height:100%;width:${Math.round(100 * count / max)}%;background:#20a88a`;
+                track.appendChild(fill);
+                const value = document.createElement('span');
+                value.textContent = String(count);
+                row.append(name, track, value);
+                chart.appendChild(row);
+            });
+            section.appendChild(chart);
+        }
+        card.appendChild(section);
+    });
+    return card;
+}
+function parseCsvProfile(text, filename) {
+    const lines = [];
+    let row = [], field = '', quoted = false;
+    for (let i = 0; i < text.length; i++) {
+        const ch = text[i];
+        if (quoted && ch === '"' && text[i + 1] === '"') {
+            field += '"';
+            i++;
+        }
+        else if (ch === '"')
+            quoted = !quoted;
+        else if (ch === ',' && !quoted) {
+            row.push(field);
+            field = '';
+        }
+        else if ((ch === '\n' || ch === '\r') && !quoted) {
+            if (ch === '\r' && text[i + 1] === '\n')
+                i++;
+            row.push(field);
+            if (row.some(v => v.trim()))
+                lines.push(row);
+            row = [];
+            field = '';
+        }
+        else
+            field += ch;
+    }
+    if (field || row.length) {
+        row.push(field);
+        lines.push(row);
+    }
+    if (lines.length < 2)
+        throw new Error('This CSV needs a header and at least one data row.');
+    const totalColumns = lines[0].length;
+    const headers = lines[0].map((h, i) => h.trim() || `Column ${i + 1}`).slice(0, 40);
+    const rows = lines.slice(1, 20001).map(values => headers.map((_, i) => { var _a; return ((_a = values[i]) !== null && _a !== void 0 ? _a : '').trim(); }));
+    const columns = headers.map((name, index) => {
+        const values = rows.map(r => r[index]);
+        const present = values.filter(v => v !== '' && !/^(na|n\/a|null|nan)$/i.test(v));
+        const nums = present.map(Number);
+        const numeric = present.length > 0 && nums.every(Number.isFinite);
+        const counts = new Map();
+        present.forEach(v => { var _a; return counts.set(v, ((_a = counts.get(v)) !== null && _a !== void 0 ? _a : 0) + 1); });
+        const base = { name, type: numeric ? 'numeric' : 'categorical', missing: values.length - present.length, unique: counts.size };
+        if (!numeric)
+            return { ...base, categories: [...counts].map(([label, count]) => ({ label: label.slice(0, 80), count })).sort((a, b) => b.count - a.count).slice(0, 8) };
+        const sorted = [...nums].sort((a, b) => a - b), mean = nums.reduce((a, b) => a + b, 0) / nums.length;
+        const variance = nums.reduce((a, b) => a + (b - mean) ** 2, 0) / nums.length;
+        const sd = Math.sqrt(variance);
+        const skew = sd ? nums.reduce((a, b) => a + ((b - mean) / sd) ** 3, 0) / nums.length : 0;
+        const min = sorted[0], max = sorted[sorted.length - 1], bins = Array(12).fill(0);
+        nums.forEach(v => bins[max === min ? 0 : Math.min(11, Math.floor((v - min) / (max - min) * 12))]++);
+        const median = sorted.length % 2 ? sorted[(sorted.length - 1) / 2] : (sorted[sorted.length / 2 - 1] + sorted[sorted.length / 2]) / 2;
+        const q1 = sorted[Math.floor((sorted.length - 1) * 0.25)], q3 = sorted[Math.floor((sorted.length - 1) * 0.75)];
+        const lower = q1 - 1.5 * (q3 - q1), upper = q3 + 1.5 * (q3 - q1);
+        const outliers = nums.filter(v => v < lower || v > upper).length;
+        return { ...base, mean: +mean.toPrecision(5), median: +median.toPrecision(5), std: +sd.toPrecision(5), skewness: +skew.toPrecision(4), min, max, outliers, histogram: bins };
+    });
+    const signatures = new Set();
+    let duplicateRows = 0;
+    rows.forEach(r => { const key = JSON.stringify(r); if (signatures.has(key))
+        duplicateRows++; signatures.add(key); });
+    return { filename, rows: lines.length - 1, profiledRows: rows.length, totalColumns, columns, duplicateRows };
 }
 function injectChatStyles() {
     if (document.getElementById('mm-chatbot-styles')) {
@@ -158,6 +1072,24 @@ function injectChatStyles() {
       container-name: mm-chatbot;
       container-type: inline-size;
     }
+
+    .mm-chatbot-drop-overlay {
+      position: absolute;
+      inset: 10px;
+      z-index: 20;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      border: 2px dashed var(--ml-assistant-accent, #6d7cff);
+      border-radius: 14px;
+      background: rgba(238, 242, 255, 0.94);
+      color: #4338ca;
+      font-size: 14px;
+      font-weight: 700;
+      pointer-events: none;
+    }
+
+    .mm-chatbot-root.mm-chatbot-dragging-files .mm-chatbot-drop-overlay { display: flex; }
 
     /* Header matching AI Assistant */
     .mm-chatbot-header {
@@ -653,6 +1585,19 @@ function injectChatStyles() {
     .mm-chat-typing-dots span:nth-child(2) { animation-delay: 0.2s; }
     .mm-chat-typing-dots span:nth-child(3) { animation-delay: 0.4s; }
 
+    .mm-chat-stream-cursor {
+      display: inline-block;
+      height: 1.1em;
+      margin-left: 2px;
+      border-left: 2px solid var(--ml-assistant-accent, #6d7cff);
+      vertical-align: text-bottom;
+      animation: mm-cursor-blink 0.8s steps(2, start) infinite;
+    }
+
+    @keyframes mm-cursor-blink {
+      to { visibility: hidden; }
+    }
+
     @keyframes mm-typing {
       0%, 60%, 100% { transform: translateY(0); opacity: 0.35; }
       30% { transform: translateY(-5px); opacity: 1; }
@@ -707,7 +1652,10 @@ function injectChatStyles() {
       font-weight: 500;
       cursor: pointer;
       transition: all 0.15s ease;
-      margin-left: auto;
+      margin-left: 4px;
+      flex: 0 0 auto;
+      white-space: nowrap;
+      scroll-snap-align: end;
     }
 
     .mm-chatbot-clear-btn:hover {
@@ -720,6 +1668,29 @@ function injectChatStyles() {
       gap: 8px;
       align-items: flex-end;
       min-width: 0;
+    }
+
+    .mm-chatbot-add-file-btn {
+      width: 38px;
+      height: 38px;
+      flex: 0 0 38px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border: 1px solid var(--ml-assistant-border, #dfe3ea);
+      border-radius: 8px;
+      background: #fff;
+      color: #475569;
+      font-size: 22px;
+      line-height: 1;
+      cursor: pointer;
+    }
+
+    .mm-chatbot-add-file-btn:hover,
+    .mm-chatbot-add-file-btn:focus-visible {
+      border-color: var(--ml-assistant-accent, #6d7cff);
+      color: #4338ca;
+      background: #f5f6ff;
     }
 
     .mm-chatbot-textarea {
@@ -790,6 +1761,313 @@ function injectChatStyles() {
       border-color: #1d4ed8;
     }
 
+    /* Model Advisor inspired refinement: clearer hierarchy, spacing, and action affordances. */
+    .mm-chatbot-root {
+      background: #f4f6fb;
+      color: #25324a;
+    }
+
+    .mm-chatbot-header {
+      padding: 11px 16px 10px;
+      gap: 7px;
+      background: #fff;
+      box-shadow: 0 2px 8px rgba(28, 39, 72, 0.035);
+      z-index: 1;
+    }
+
+    .mm-chatbot-title {
+      font-size: 16px;
+      letter-spacing: -0.02em;
+    }
+
+    .mm-chatbot-title-icon {
+      display: inline-flex;
+      width: 30px;
+      height: 30px;
+      align-items: center;
+      justify-content: center;
+      border-radius: 9px;
+      background: #eeedff;
+      color: #5145cd;
+      font-size: 16px;
+    }
+
+    .mm-chatbot-provider-switch {
+      padding: 4px;
+      border-radius: 10px;
+      background: #f5f6fb;
+    }
+
+    .mm-chatbot-provider-btn {
+      min-height: 32px;
+      padding: 6px 11px;
+      font-size: 12px;
+      border-radius: 7px;
+    }
+
+    .mm-chatbot-status-pill {
+      padding: 4px 9px;
+      font-size: 11px;
+      background: #e9f8f0;
+      color: #17764d;
+      border-color: #d4f0e1;
+    }
+
+    .mm-chatbot-context-bar {
+      min-height: 0;
+      margin-left: auto;
+      padding: 0;
+      background: transparent;
+      font-size: 11px;
+      white-space: nowrap;
+    }
+
+    .mm-chatbot-context-bar > span:first-child { color: #6a778d; }
+
+    .mm-chatbot-status-bar {
+      justify-content: flex-start;
+      gap: 7px;
+      min-height: 30px;
+    }
+
+    .mm-chatbot-context-chip {
+      min-height: 28px;
+      padding: 4px 10px;
+      font-size: 11.5px;
+      border-radius: 7px;
+    }
+
+    .mm-chatbot-messages {
+      padding: 18px 20px;
+      gap: 18px;
+      background:
+        radial-gradient(ellipse at 10% 0%, rgba(109, 91, 230, 0.035), transparent 38%),
+        #f4f6fb;
+    }
+
+    .mm-chat-msg { gap: 10px; }
+    .mm-chat-avatar { width: 32px; height: 32px; font-size: 15px; }
+    .mm-chat-bubble-container { gap: 5px; }
+    .mm-chat-bubble-header { font-size: 11px; padding-inline: 4px; }
+    .mm-chat-sender-name { font-size: 12px; }
+    .mm-chat-provider-badge { padding: 2px 7px; font-size: 10px; }
+
+    .mm-chat-msg-user .mm-chat-bubble-container {
+      max-width: min(86%, 720px);
+    }
+
+    .mm-chat-bubble {
+      padding: 14px 16px;
+      border-radius: 12px;
+      font-size: 14px;
+      line-height: 1.7;
+    }
+
+    .mm-chat-bubble-user {
+      background: #eeedff;
+      border-color: #dcd9ff;
+      border-top-right-radius: 4px;
+      color: #282451;
+    }
+
+    .mm-chat-bubble-assistant {
+      border-color: #e1e6ef;
+      border-left: 3px solid #7062e8;
+      border-top-left-radius: 4px;
+      box-shadow: 0 3px 12px rgba(26, 39, 73, 0.055);
+    }
+
+    .mm-chat-bubble-error {
+      border-left-color: #d44f5d !important;
+    }
+
+    .mm-chat-msg-content { gap: 11px; }
+    .mm-chat-text-seg {
+      margin: 0;
+      color: #35435a;
+      font-size: 14px;
+      line-height: 1.72;
+    }
+
+    .mm-chat-text-seg strong { color: #1b2940; }
+    .mm-chat-text-seg em { color: #5145cd; }
+
+    .mm-chat-heading {
+      margin: 5px 0 0;
+      color: #202d45;
+      font-size: 15px;
+      line-height: 1.4;
+      font-weight: 750;
+      letter-spacing: -0.01em;
+    }
+
+    .mm-chat-heading:first-child { margin-top: 0; }
+    .mm-chat-heading + .mm-chat-text-seg { margin-top: -4px; }
+
+    .mm-chat-list {
+      margin: -2px 0 0;
+      padding-left: 23px;
+      color: #35435a;
+      font-size: 14px;
+      line-height: 1.7;
+    }
+
+    .mm-chat-list li { padding-left: 3px; margin: 5px 0; }
+    .mm-chat-list li::marker { color: #6256d7; font-weight: 700; }
+
+    .mm-chat-inline-code {
+      padding: 2px 6px;
+      border-radius: 5px;
+      background: #f1f3f9;
+      border-color: #e1e5ee;
+      color: #352f7c;
+      font-size: 0.9em;
+    }
+
+    .mm-chat-code-block {
+      margin: 3px 0;
+      border-radius: 10px;
+      border-color: #d5dce8;
+      box-shadow: 0 3px 10px rgba(16, 24, 40, 0.12);
+    }
+
+    .mm-chat-code-lang {
+      min-height: 35px;
+      padding: 5px 11px;
+      background: #f7f8fc;
+    }
+
+    .mm-chat-code-lang span { font-size: 10.5px; letter-spacing: 0.7px; }
+
+    .mm-chat-copy-btn {
+      padding: 4px 9px;
+      border-radius: 6px;
+      font-size: 11px;
+    }
+
+    .mm-chat-code-block pre {
+      max-height: 460px;
+      padding: 14px 16px;
+    }
+
+    .mm-chat-code-block code {
+      font-size: 12.5px;
+      line-height: 1.62;
+    }
+
+    .mm-chat-welcome {
+      gap: 13px;
+      padding: 30px 24px;
+      border-radius: 15px;
+      border-color: #e1e6ef;
+      box-shadow: 0 5px 20px rgba(26, 39, 73, 0.055);
+    }
+
+    .mm-chat-welcome-icon {
+      width: 62px;
+      height: 62px;
+      background: linear-gradient(140deg, #eeedff, #e9f7f1);
+    }
+
+    .mm-chat-welcome-title { font-size: 18px; }
+    .mm-chat-welcome-sub { max-width: 340px; font-size: 13px; line-height: 1.65; }
+    .mm-chat-suggestions { gap: 8px; margin-top: 7px; }
+
+    .mm-chat-suggestion-chip {
+      padding: 10px 13px;
+      border-radius: 9px;
+      background: #f9faff;
+      font-size: 12px;
+    }
+
+    .mm-chatbot-input-area {
+      padding: 11px 16px 14px;
+      gap: 10px;
+      background: #fff;
+      box-shadow: 0 -3px 12px rgba(28, 39, 72, 0.035);
+    }
+
+    .mm-chatbot-input-helpers {
+      gap: 7px;
+      flex-wrap: nowrap;
+      overflow-x: auto;
+      overflow-y: hidden;
+      padding: 2px 2px 7px;
+      cursor: grab;
+      user-select: none;
+      touch-action: pan-x;
+      scrollbar-width: thin;
+      scrollbar-color: #c8cde0 transparent;
+      scroll-snap-type: x proximity;
+      overscroll-behavior-x: contain;
+    }
+
+    .mm-chatbot-input-helpers::-webkit-scrollbar { height: 5px; }
+    .mm-chatbot-input-helpers::-webkit-scrollbar-track { background: #f0f2f8; border-radius: 99px; }
+    .mm-chatbot-input-helpers::-webkit-scrollbar-thumb { background: #c8cde0; border-radius: 99px; }
+    .mm-chatbot-input-helpers::-webkit-scrollbar-thumb:hover { background: #aeb5cd; }
+    .mm-chatbot-input-helpers.is-dragging { cursor: grabbing; scroll-snap-type: none; }
+
+    .mm-chat-helper-btn {
+      min-height: 32px;
+      padding: 6px 10px;
+      flex: 0 0 auto;
+      border-radius: 7px;
+      background: #fff;
+      color: #4e5c72;
+      font-size: 11.5px;
+      font-weight: 600;
+      white-space: nowrap;
+      scroll-snap-align: start;
+    }
+
+    .mm-chat-helper-btn:hover {
+      border-color: #c9c4ff;
+      color: #4c42c2;
+      background: #f4f3ff;
+      transform: translateY(-1px);
+    }
+
+    .mm-chatbot-add-file-btn,
+    .mm-chatbot-send-btn { width: 42px; height: 42px; flex-basis: 42px; border-radius: 10px; }
+    .mm-chatbot-textarea {
+      min-height: 42px;
+      padding: 10px 13px;
+      border-radius: 10px;
+      font-size: 13px;
+      line-height: 1.5;
+    }
+
+    .mm-chatbot-textarea:focus {
+      box-shadow: 0 0 0 3px rgba(109, 91, 230, 0.13);
+    }
+
+    .mm-chatbot-send-btn {
+      background: #594de0;
+      border-color: #594de0;
+      box-shadow: 0 2px 6px rgba(89, 77, 224, 0.2);
+    }
+
+    .mm-chatbot-send-btn:hover:not(:disabled) {
+      background: #493fc5;
+      border-color: #493fc5;
+    }
+
+    .mm-chatbot-root button:focus-visible,
+    .mm-chatbot-root textarea:focus-visible {
+      outline: 3px solid rgba(89, 77, 224, 0.22);
+      outline-offset: 2px;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .mm-chatbot-root *, .mm-chatbot-root *::before, .mm-chatbot-root *::after {
+        scroll-behavior: auto !important;
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+      }
+    }
+
     @container mm-chatbot (max-width: 380px) {
       .mm-chatbot-header { padding-inline: 10px; }
       .mm-chatbot-title-row { align-items: flex-start; gap: 7px; }
@@ -805,21 +2083,27 @@ function injectChatStyles() {
         padding: 5px 6px;
         white-space: nowrap;
       }
-      .mm-chatbot-context-bar { padding-inline: 10px; }
+      .mm-chatbot-context-bar { margin-left: 0; padding: 0; }
       .mm-chatbot-messages { padding: 10px; }
       .mm-chatbot-input-area { padding-inline: 10px; }
       .mm-chatbot-input-helpers { gap: 5px; }
-      .mm-chat-helper-btn { flex: 0 1 auto; padding-inline: 7px; }
-      .mm-chatbot-clear-btn { margin-left: auto; }
+      .mm-chat-helper-btn { flex: 0 0 auto; padding-inline: 7px; }
+      .mm-chatbot-clear-btn { margin-left: 4px; }
+      .mm-chat-bubble { padding: 11px 12px; font-size: 13px; }
+      .mm-chat-text-seg, .mm-chat-list { font-size: 13px; }
+      .mm-chat-msg-user .mm-chat-bubble-container { max-width: 90%; }
+      .mm-chatbot-add-file-btn, .mm-chatbot-send-btn { width: 38px; height: 38px; flex-basis: 38px; }
     }
   `;
     document.head.appendChild(style);
 }
-function createAIChatbotPanel(settings, getActiveCode, getActiveError) {
+function createAIChatbotPanel(settings, getActiveCode, getActiveError, runCodeTrace, loadDecisionTrees, loadNeuralNetworks, loadTrainingSources, trainModel) {
     injectChatStyles();
     const messages = [];
     let currentProvider = 'ollama';
     let isTyping = false;
+    let attachedDataset = null;
+    let attachedCode = '';
     const conversationHistory = [];
     // Root
     const root = document.createElement('div');
@@ -868,6 +2152,7 @@ function createAIChatbotPanel(settings, getActiveCode, getActiveError) {
     errorChip.title = 'Paste last error into your message';
     errorChip.innerHTML = '🐞 Last Error';
     contextBar.append(codeChip, errorChip);
+    statusBar.appendChild(contextBar);
     // Messages area
     const messagesArea = document.createElement('div');
     messagesArea.className = 'mm-chatbot-messages';
@@ -895,7 +2180,7 @@ function createAIChatbotPanel(settings, getActiveCode, getActiveError) {
         chip.addEventListener('click', () => {
             let question = q.replace(/^[^\s]+\s/, ''); // remove emoji prefix
             if (q.includes('active cell')) {
-                const code = getActiveCode();
+                const code = attachedCode || getActiveCode();
                 if (code) {
                     question = `Explain this code:\n\`\`\`python\n${code}\n\`\`\``;
                 }
@@ -919,9 +2204,233 @@ function createAIChatbotPanel(settings, getActiveCode, getActiveError) {
     inputArea.className = 'mm-chatbot-input-area';
     const helpers = document.createElement('div');
     helpers.className = 'mm-chatbot-input-helpers';
+    helpers.tabIndex = 0;
+    helpers.setAttribute('role', 'toolbar');
+    helpers.setAttribute('aria-label', 'Chat tools. Scroll horizontally to see more actions.');
+    let helperPointerStartX = 0;
+    let helperScrollStart = 0;
+    let helperPointerDown = false;
+    let helperDidDrag = false;
+    let suppressHelperClick = false;
+    helpers.addEventListener('pointerdown', event => {
+        if (event.button !== 0)
+            return;
+        helperPointerStartX = event.clientX;
+        helperScrollStart = helpers.scrollLeft;
+        helperPointerDown = true;
+        helperDidDrag = false;
+    });
+    helpers.addEventListener('pointermove', event => {
+        if (!helperPointerDown)
+            return;
+        const distance = event.clientX - helperPointerStartX;
+        if (Math.abs(distance) > 5) {
+            helperDidDrag = true;
+            if (!helpers.hasPointerCapture(event.pointerId))
+                helpers.setPointerCapture(event.pointerId);
+            helpers.classList.add('is-dragging');
+            helpers.scrollLeft = helperScrollStart - distance;
+        }
+    });
+    const finishHelperDrag = () => {
+        if (!helperPointerDown)
+            return;
+        helperPointerDown = false;
+        helpers.classList.remove('is-dragging');
+        if (helperDidDrag) {
+            suppressHelperClick = true;
+            window.setTimeout(() => { suppressHelperClick = false; }, 450);
+        }
+    };
+    helpers.addEventListener('pointerup', finishHelperDrag);
+    helpers.addEventListener('pointercancel', finishHelperDrag);
+    helpers.addEventListener('click', event => {
+        if (!suppressHelperClick)
+            return;
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        suppressHelperClick = false;
+    }, true);
+    helpers.addEventListener('wheel', event => {
+        if (Math.abs(event.deltaY) <= Math.abs(event.deltaX))
+            return;
+        helpers.scrollLeft += event.deltaY;
+        event.preventDefault();
+    }, { passive: false });
+    const csvInput = document.createElement('input');
+    csvInput.type = 'file';
+    csvInput.accept = '.csv,text/csv';
+    csvInput.style.display = 'none';
+    const codeInput = document.createElement('input');
+    codeInput.type = 'file';
+    codeInput.accept = '.py,.ipynb,.js,.ts,.jsx,.tsx,.java,.c,.cpp,.go,.rs,.txt,.json,text/plain,application/json';
+    codeInput.style.display = 'none';
+    function showUploadError(error, fallback) {
+        const msg = {
+            role: 'assistant', timestamp: new Date(), isError: true,
+            content: error instanceof Error ? error.message : fallback
+        };
+        messages.push(msg);
+        appendMessage(msg);
+    }
+    async function handleCsvFile(file) {
+        try {
+            if (file.size > 10 * 1024 * 1024)
+                throw new Error('CSV is larger than 10 MB. Please use a smaller file for chat analysis.');
+            const profile = parseCsvProfile(await file.text(), file.name);
+            attachedDataset = profile;
+            const summary = profile.columns.slice(0, 20).map(col => col.type === 'numeric'
+                ? `${col.name}: numeric, mean ${col.mean}, median ${col.median}, skewness ${col.skewness}, missing ${col.missing}`
+                : `${col.name}: categorical, ${col.unique} unique values, missing ${col.missing}`).join('\n');
+            const msg = {
+                role: 'assistant', timestamp: new Date(), datasetProfile: profile,
+                content: `I analyzed **${profile.filename}** locally. The profile includes numeric distributions, skewness, missing values, category frequencies, and duplicate rows.\n\n${summary}`
+            };
+            messages.push(msg);
+            appendMessage(msg);
+            if (currentProvider === 'ollama') {
+                textarea.value = 'Explain the main patterns in this CSV profile, including distributions, skewness, missing data, category balance, duplicates, unusual values, and practical next steps. Cite the measured values and clearly identify any sample-based results.';
+                sendMessage();
+            }
+            else {
+                const notice = {
+                    role: 'assistant', timestamp: new Date(),
+                    content: 'The CSV profile stays local. Switch the provider to Ollama and ask for an explanation to get a model interpretation of these measurements.'
+                };
+                messages.push(notice);
+                appendMessage(notice);
+            }
+        }
+        catch (error) {
+            showUploadError(error, 'Could not analyze this CSV.');
+        }
+    }
+    async function handleCodeFile(file) {
+        var _a;
+        try {
+            if (file.size > 100 * 1024)
+                throw new Error('Code file is larger than 100 KB. Please choose a smaller file.');
+            let content = await file.text();
+            if (file.name.toLowerCase().endsWith('.ipynb')) {
+                const notebook = JSON.parse(content);
+                content = ((_a = notebook.cells) !== null && _a !== void 0 ? _a : []).filter(cell => cell.cell_type === 'code').map(cell => { var _a; return Array.isArray(cell.source) ? cell.source.join('') : (_a = cell.source) !== null && _a !== void 0 ? _a : ''; }).join('\n\n');
+            }
+            attachedCode = content.slice(0, 3000);
+            const msg = {
+                role: 'assistant', timestamp: new Date(),
+                content: `Loaded **${file.name}** (${content.split(/\r?\n/).length} lines). Use **Explain Code** or ask a question. The file stays on this computer; the selected chat provider receives only the first 3,000 characters when you send a message.`
+            };
+            messages.push(msg);
+            appendMessage(msg);
+        }
+        catch (error) {
+            showUploadError(error, 'Could not read this code file.');
+        }
+    }
+    const csvButton = document.createElement('button');
+    csvButton.className = 'mm-chat-helper-btn';
+    csvButton.textContent = '📊 Analyze CSV';
+    csvButton.addEventListener('click', () => csvInput.click());
+    csvInput.addEventListener('change', async () => {
+        var _a;
+        const file = (_a = csvInput.files) === null || _a === void 0 ? void 0 : _a[0];
+        csvInput.value = '';
+        if (file)
+            await handleCsvFile(file);
+    });
+    helpers.append(csvButton, csvInput);
+    const codeButton = document.createElement('button');
+    codeButton.className = 'mm-chat-helper-btn';
+    codeButton.textContent = '🧩 Upload Code';
+    codeButton.addEventListener('click', () => codeInput.click());
+    codeInput.addEventListener('change', async () => {
+        var _a;
+        const file = (_a = codeInput.files) === null || _a === void 0 ? void 0 : _a[0];
+        codeInput.value = '';
+        if (file)
+            await handleCodeFile(file);
+    });
+    helpers.append(codeButton, codeInput);
     const helperBtns = [
+        { icon: '🌳', label: 'Visualize Tree', action: async () => {
+                const msg = {
+                    role: 'assistant', timestamp: new Date(), provider: currentProvider,
+                    content: 'Reading fitted scikit-learn decision trees from the current notebook kernel…'
+                };
+                messages.push(msg);
+                const pending = appendMessage(msg);
+                try {
+                    const trees = await loadDecisionTrees();
+                    msg.decisionTrees = trees;
+                    msg.content = trees.length
+                        ? `Found ${trees.length} fitted decision tree${trees.length === 1 ? '' : 's'} in the current kernel. This view is built from the fitted model.`
+                        : 'No fitted scikit-learn decision tree was found in the current notebook kernel.';
+                }
+                catch (error) {
+                    msg.isError = true;
+                    msg.content = error instanceof Error ? error.message : 'Could not inspect fitted decision trees.';
+                }
+                pending.replaceWith(createMessageBubble(msg, runCodeTrace, getActiveCode, loadDecisionTrees, loadNeuralNetworks, trainModel));
+                messagesArea.scrollTop = messagesArea.scrollHeight;
+            } },
+        { icon: '🧠', label: 'Visualize Neural Network', action: async () => {
+                const msg = {
+                    role: 'assistant', timestamp: new Date(), provider: currentProvider,
+                    content: 'Reading fitted scikit-learn MLP networks from the current notebook kernel…'
+                };
+                messages.push(msg);
+                const pending = appendMessage(msg);
+                try {
+                    const networks = await loadNeuralNetworks();
+                    msg.neuralNetworks = networks;
+                    msg.content = networks.length
+                        ? `Found ${networks.length} fitted neural network${networks.length === 1 ? '' : 's'} in the current kernel. The diagram shows the learned layer structure and weights.`
+                        : 'No fitted scikit-learn MLP neural network was found in the current notebook kernel.';
+                }
+                catch (error) {
+                    msg.isError = true;
+                    msg.content = error instanceof Error ? error.message : 'Could not inspect fitted neural networks.';
+                }
+                pending.replaceWith(createMessageBubble(msg, runCodeTrace, getActiveCode, loadDecisionTrees, loadNeuralNetworks, trainModel));
+                messagesArea.scrollTop = messagesArea.scrollHeight;
+            } },
+        { icon: '🏋', label: 'Train ML Model', action: async () => {
+                const msg = {
+                    role: 'assistant', timestamp: new Date(), provider: currentProvider,
+                    content: 'Checking the active notebook for prepared training data…'
+                };
+                messages.push(msg);
+                const pending = appendMessage(msg);
+                try {
+                    msg.trainingSources = await loadTrainingSources();
+                    msg.content = msg.trainingSources.length
+                        ? `Found ${msg.trainingSources.length} prepared feature/target pair${msg.trainingSources.length === 1 ? '' : 's'}. Choose a model to train locally.`
+                        : 'No prepared feature/target pair was found in the active kernel.';
+                }
+                catch (error) {
+                    msg.isError = true;
+                    msg.content = error instanceof Error ? error.message : 'Could not inspect training data in the notebook kernel.';
+                }
+                pending.replaceWith(createMessageBubble(msg, runCodeTrace, getActiveCode, loadDecisionTrees, loadNeuralNetworks, trainModel));
+                messagesArea.scrollTop = messagesArea.scrollHeight;
+            } },
+        { icon: '▶', label: 'Animate Code', action: () => {
+                const code = (attachedCode || getActiveCode()).trim();
+                if (!code) {
+                    showUploadError(new Error('Select a code cell or upload a code file first.'), 'Select a code cell or upload a code file first.');
+                    return;
+                }
+                const msg = {
+                    role: 'assistant', timestamp: new Date(), provider: currentProvider,
+                    content: 'Confirm Run & trace to capture the executed lines and variable values for this code.',
+                    animationCode: code,
+                    animationUsesActiveCell: !attachedCode
+                };
+                messages.push(msg);
+                appendMessage(msg);
+            } },
         { icon: '📋', label: 'Paste Code', action: () => {
-                const code = getActiveCode();
+                const code = attachedCode || getActiveCode();
                 if (code) {
                     textarea.value += (textarea.value ? '\n' : '') + `\`\`\`python\n${code.slice(0, 3000)}\n\`\`\``;
                     adjustTextareaHeight();
@@ -939,7 +2448,7 @@ function createAIChatbotPanel(settings, getActiveCode, getActiveError) {
                 }
             } },
         { icon: '📝', label: 'Explain Code', action: () => {
-                const code = getActiveCode();
+                const code = attachedCode || getActiveCode();
                 if (code) {
                     textarea.value = `Please explain this code in detail:\n\`\`\`python\n${code.slice(0, 3000)}\n\`\`\``;
                     adjustTextareaHeight();
@@ -965,6 +2474,45 @@ function createAIChatbotPanel(settings, getActiveCode, getActiveError) {
     helpers.appendChild(clearBtn);
     const inputRow = document.createElement('div');
     inputRow.className = 'mm-chatbot-input-row';
+    const addFileInput = document.createElement('input');
+    addFileInput.type = 'file';
+    addFileInput.accept = `${csvInput.accept},${codeInput.accept}`;
+    addFileInput.style.display = 'none';
+    addFileInput.setAttribute('aria-label', 'Choose a CSV or code file');
+    const addFileButton = document.createElement('button');
+    addFileButton.type = 'button';
+    addFileButton.className = 'mm-chatbot-add-file-btn';
+    addFileButton.textContent = '+';
+    addFileButton.title = 'Attach a CSV or code file';
+    addFileButton.setAttribute('aria-label', 'Attach a CSV or code file');
+    addFileButton.addEventListener('click', () => addFileInput.click());
+    async function handleAttachedFiles(files) {
+        const selectedFiles = Array.from(files);
+        if (selectedFiles.length > 1) {
+            showUploadError(new Error('Add one file at a time so I can keep each file’s analysis separate.'), 'Please add one file at a time.');
+            return;
+        }
+        const file = selectedFiles[0];
+        if (!file)
+            return;
+        const lowerName = file.name.toLowerCase();
+        if (lowerName.endsWith('.csv') || file.type === 'text/csv') {
+            await handleCsvFile(file);
+            return;
+        }
+        const codeExtensions = /\.(py|ipynb|js|ts|jsx|tsx|java|c|cpp|go|rs|txt|json)$/i;
+        if (codeExtensions.test(lowerName) || file.type === 'text/plain' || file.type === 'application/json') {
+            await handleCodeFile(file);
+            return;
+        }
+        showUploadError(new Error('Unsupported file type. Add a CSV or a code/text file such as .py, .ipynb, .js, .ts, or .txt.'), 'Unsupported file type.');
+    }
+    addFileInput.addEventListener('change', async () => {
+        const files = addFileInput.files;
+        addFileInput.value = '';
+        if (files)
+            await handleAttachedFiles(files);
+    });
     const textarea = document.createElement('textarea');
     textarea.className = 'mm-chatbot-textarea';
     textarea.placeholder = 'Ask anything about code, ML, or Python... (Shift+Enter for newline)';
@@ -973,7 +2521,7 @@ function createAIChatbotPanel(settings, getActiveCode, getActiveError) {
     sendBtn.className = 'mm-chatbot-send-btn';
     sendBtn.title = 'Send message';
     sendBtn.innerHTML = '➤';
-    inputRow.append(textarea, sendBtn);
+    inputRow.append(addFileButton, addFileInput, textarea, sendBtn);
     inputArea.append(helpers, inputRow);
     function adjustTextareaHeight() {
         textarea.style.height = 'auto';
@@ -1071,7 +2619,7 @@ function createAIChatbotPanel(settings, getActiveCode, getActiveError) {
         if (welcomeEl) {
             welcomeEl.remove();
         }
-        const el = createMessageBubble(msg);
+        const el = createMessageBubble(msg, runCodeTrace, getActiveCode, loadDecisionTrees, loadNeuralNetworks, trainModel);
         messagesArea.appendChild(el);
         messagesArea.scrollTop = messagesArea.scrollHeight;
         return el;
@@ -1091,7 +2639,7 @@ function createAIChatbotPanel(settings, getActiveCode, getActiveError) {
         // Update history
         conversationHistory.push({ role: 'user', content: text });
         // Show typing indicator
-        const typingMsg = { role: 'assistant', content: '', timestamp: new Date(), isStreaming: true };
+        const typingMsg = { role: 'assistant', content: '', provider: currentProvider, timestamp: new Date(), isStreaming: true };
         const typingEl = appendMessage(typingMsg);
         try {
             const result = await requestChatAPI(settings, {
@@ -1099,22 +2647,29 @@ function createAIChatbotPanel(settings, getActiveCode, getActiveError) {
                 provider: currentProvider,
                 history: conversationHistory.slice(-10), // last 5 exchanges
                 context: {
-                    active_code: getActiveCode().slice(0, 3000),
+                    active_code: (attachedCode || getActiveCode()).slice(0, 3000),
+                    dataset_profile: attachedDataset,
                 }
             });
-            typingEl.remove();
             if (result.status === 'replied' && result.reply) {
                 const replyMsg = {
                     role: 'assistant',
                     content: result.reply,
                     provider: result.provider || currentProvider,
-                    timestamp: new Date()
+                    timestamp: new Date(),
+                    codeProfile: /explain|walk through|what does this code|how does this code/i.test(text) && (attachedCode || getActiveCode())
+                        ? summarizeCodeStructure(attachedCode || getActiveCode())
+                        : undefined
                 };
+                const streamed = await streamAssistantReplyInPlace(typingEl, result.reply, messagesArea);
+                if (!streamed)
+                    return;
+                typingEl.replaceWith(createMessageBubble(replyMsg, runCodeTrace, getActiveCode, loadDecisionTrees, loadNeuralNetworks, trainModel));
                 messages.push(replyMsg);
-                appendMessage(replyMsg);
                 conversationHistory.push({ role: 'assistant', content: result.reply });
             }
             else {
+                typingEl.remove();
                 conversationHistory.pop(); // Remove un-replied user message on error
                 let errText = 'I could not respond right now.';
                 if (result.status === 'model_missing') {
@@ -1122,6 +2677,15 @@ function createAIChatbotPanel(settings, getActiveCode, getActiveError) {
                 }
                 else if (result.status === 'ollama_unavailable') {
                     errText = '🦙 Ollama is not running. Start Ollama, or switch to Gemini.';
+                }
+                else if (result.status === 'chat_unavailable') {
+                    errText = '🦙 Ollama is running, but it could not finish this reply. Try again; shorter prompts usually respond faster.';
+                }
+                else if (result.status === 'context_too_large') {
+                    errText = 'This file profile is too large to send to the local model. Try a smaller CSV or ask about fewer columns.';
+                }
+                else if (result.status === 'model_status_unavailable') {
+                    errText = '🦙 Ollama is responding, but the selected model is not ready. Check the AI Assistant model status and try again.';
                 }
                 else if (result.status === 'gemini_unconfigured') {
                     errText =
@@ -1173,7 +2737,46 @@ function createAIChatbotPanel(settings, getActiveCode, getActiveError) {
         const err = getActiveError();
         errorChip.style.display = err ? 'inline-flex' : 'none';
     }, 2000);
-    root.append(header, contextBar, messagesArea, inputArea);
+    const dropOverlay = document.createElement('div');
+    dropOverlay.className = 'mm-chatbot-drop-overlay';
+    dropOverlay.textContent = '＋ Drop one CSV or code file to attach';
+    root.append(header, messagesArea, inputArea, dropOverlay);
+    let fileDragDepth = 0;
+    root.addEventListener('dragenter', (event) => {
+        var _a, _b;
+        if (!Array.from((_b = (_a = event.dataTransfer) === null || _a === void 0 ? void 0 : _a.types) !== null && _b !== void 0 ? _b : []).includes('Files'))
+            return;
+        event.preventDefault();
+        fileDragDepth += 1;
+        root.classList.add('mm-chatbot-dragging-files');
+    });
+    root.addEventListener('dragover', (event) => {
+        var _a, _b;
+        if (!Array.from((_b = (_a = event.dataTransfer) === null || _a === void 0 ? void 0 : _a.types) !== null && _b !== void 0 ? _b : []).includes('Files'))
+            return;
+        event.preventDefault();
+        if (event.dataTransfer)
+            event.dataTransfer.dropEffect = 'copy';
+    });
+    root.addEventListener('dragleave', (event) => {
+        var _a, _b;
+        if (!Array.from((_b = (_a = event.dataTransfer) === null || _a === void 0 ? void 0 : _a.types) !== null && _b !== void 0 ? _b : []).includes('Files'))
+            return;
+        event.preventDefault();
+        fileDragDepth = Math.max(0, fileDragDepth - 1);
+        if (fileDragDepth === 0)
+            root.classList.remove('mm-chatbot-dragging-files');
+    });
+    root.addEventListener('drop', event => {
+        var _a;
+        const files = (_a = event.dataTransfer) === null || _a === void 0 ? void 0 : _a.files;
+        if (!(files === null || files === void 0 ? void 0 : files.length))
+            return;
+        event.preventDefault();
+        fileDragDepth = 0;
+        root.classList.remove('mm-chatbot-dragging-files');
+        void handleAttachedFiles(files);
+    });
     return root;
 }
 
@@ -2108,21 +3711,26 @@ __webpack_require__.d(__webpack_exports__, {
 });
 /* import */ var _jupyterlab_cells__rspack_import_0 = __webpack_require__("webpack/sharing/consume/default/@jupyterlab/cells");
 /* import */ var _jupyterlab_cells__rspack_import_0_default = /*#__PURE__*/__webpack_require__.n(_jupyterlab_cells__rspack_import_0);
-/* import */ var _jupyterlab_mainmenu__rspack_import_1 = __webpack_require__("webpack/sharing/consume/default/@jupyterlab/mainmenu");
-/* import */ var _jupyterlab_mainmenu__rspack_import_1_default = /*#__PURE__*/__webpack_require__.n(_jupyterlab_mainmenu__rspack_import_1);
-/* import */ var _jupyterlab_notebook__rspack_import_2 = __webpack_require__("webpack/sharing/consume/default/@jupyterlab/notebook");
-/* import */ var _jupyterlab_notebook__rspack_import_2_default = /*#__PURE__*/__webpack_require__.n(_jupyterlab_notebook__rspack_import_2);
-/* import */ var _jupyterlab_translation__rspack_import_3 = __webpack_require__("webpack/sharing/consume/default/@jupyterlab/translation");
-/* import */ var _jupyterlab_translation__rspack_import_3_default = /*#__PURE__*/__webpack_require__.n(_jupyterlab_translation__rspack_import_3);
-/* import */ var _lumino_widgets__rspack_import_4 = __webpack_require__("webpack/sharing/consume/default/@lumino/widgets");
-/* import */ var _lumino_widgets__rspack_import_4_default = /*#__PURE__*/__webpack_require__.n(_lumino_widgets__rspack_import_4);
-/* import */ var _style_modelmind_logo_png__rspack_import_5 = __webpack_require__("./style/modelmind-logo.png");
-/* import */ var _fix_utils__rspack_import_8 = __webpack_require__("./lib/fix-utils.js");
-/* import */ var _request__rspack_import_6 = __webpack_require__("./lib/request.js");
-/* import */ var _modelmind_studio__rspack_import_10 = __webpack_require__("./lib/modelmind-studio.js");
-/* import */ var _debugger_tutor__rspack_import_7 = __webpack_require__("./lib/debugger-tutor.js");
-/* import */ var _ai_chatbot__rspack_import_9 = __webpack_require__("./lib/ai-chatbot.js");
-/* import */ var _api_key_settings__rspack_import_11 = __webpack_require__("./lib/api-key-settings.js");
+/* import */ var _jupyterlab_docmanager__rspack_import_1 = __webpack_require__("webpack/sharing/consume/default/@jupyterlab/docmanager");
+/* import */ var _jupyterlab_docmanager__rspack_import_1_default = /*#__PURE__*/__webpack_require__.n(_jupyterlab_docmanager__rspack_import_1);
+/* import */ var _jupyterlab_mainmenu__rspack_import_2 = __webpack_require__("webpack/sharing/consume/default/@jupyterlab/mainmenu");
+/* import */ var _jupyterlab_mainmenu__rspack_import_2_default = /*#__PURE__*/__webpack_require__.n(_jupyterlab_mainmenu__rspack_import_2);
+/* import */ var _jupyterlab_notebook__rspack_import_3 = __webpack_require__("webpack/sharing/consume/default/@jupyterlab/notebook");
+/* import */ var _jupyterlab_notebook__rspack_import_3_default = /*#__PURE__*/__webpack_require__.n(_jupyterlab_notebook__rspack_import_3);
+/* import */ var _jupyterlab_translation__rspack_import_4 = __webpack_require__("webpack/sharing/consume/default/@jupyterlab/translation");
+/* import */ var _jupyterlab_translation__rspack_import_4_default = /*#__PURE__*/__webpack_require__.n(_jupyterlab_translation__rspack_import_4);
+/* import */ var _lumino_widgets__rspack_import_5 = __webpack_require__("webpack/sharing/consume/default/@lumino/widgets");
+/* import */ var _lumino_widgets__rspack_import_5_default = /*#__PURE__*/__webpack_require__.n(_lumino_widgets__rspack_import_5);
+/* import */ var _style_modelmind_logo_png__rspack_import_6 = __webpack_require__("./style/modelmind-logo.png");
+/* import */ var _fix_utils__rspack_import_9 = __webpack_require__("./lib/fix-utils.js");
+/* import */ var _request__rspack_import_7 = __webpack_require__("./lib/request.js");
+/* import */ var _modelmind_studio__rspack_import_11 = __webpack_require__("./lib/modelmind-studio.js");
+/* import */ var _debugger_tutor__rspack_import_8 = __webpack_require__("./lib/debugger-tutor.js");
+/* import */ var _ai_chatbot__rspack_import_10 = __webpack_require__("./lib/ai-chatbot.js");
+/* import */ var _api_key_settings__rspack_import_12 = __webpack_require__("./lib/api-key-settings.js");
+/* import */ var _notebook_mode__rspack_import_13 = __webpack_require__("./lib/notebook-mode.js");
+
+
 
 
 
@@ -2146,7 +3754,7 @@ function setModelMindFavicon() {
     favicon.rel = 'icon';
     favicon.type = 'image/png';
     favicon.setAttribute('sizes', '256x256');
-    favicon.href = _style_modelmind_logo_png__rspack_import_5;
+    favicon.href = _style_modelmind_logo_png__rspack_import_6;
     document.head.appendChild(favicon);
 }
 function removeJupyterSplashOrbitAnimation() {
@@ -2401,10 +4009,10 @@ const plugin = {
     id: '@ml-platform/error-assistant:plugin',
     description: 'JupyterLab error assistant frontend and server extension',
     autoStart: true,
-    requires: [_jupyterlab_mainmenu__rspack_import_1.IMainMenu, _jupyterlab_notebook__rspack_import_2.INotebookTracker, _jupyterlab_translation__rspack_import_3.ITranslator],
-    activate: (app, mainMenu, notebooks, translator) => {
+    requires: [_jupyterlab_mainmenu__rspack_import_2.IMainMenu, _jupyterlab_notebook__rspack_import_3.INotebookTracker, _jupyterlab_translation__rspack_import_4.ITranslator, _jupyterlab_docmanager__rspack_import_1.IDocumentManager],
+    activate: (app, mainMenu, notebooks, translator, documentManager) => {
         const trans = translator.load('@ml-platform/error-assistant');
-        const panel = new _lumino_widgets__rspack_import_4.Widget();
+        const panel = new _lumino_widgets__rspack_import_5.Widget();
         panel.id = 'ml-platform-error-assistant-panel';
         panel.title.label = 'Error Assistant';
         panel.title.caption = 'Notebook error assistant';
@@ -2488,7 +4096,7 @@ const plugin = {
         panel.node.append(shell);
         const setStatus = async () => {
             try {
-                const health = await (0,_request__rspack_import_6.requestAPI)('api/health', app.serviceManager.serverSettings);
+                const health = await (0,_request__rspack_import_7.requestAPI)('api/health', app.serviceManager.serverSettings);
                 localStatus.textContent =
                     health.status === 'ok' ? 'Ollama (Local AI)' : 'Platform unavailable';
                 localStatus.className =
@@ -2519,7 +4127,7 @@ const plugin = {
                     'ml-assistant-status-pill ml-assistant-status-warn';
             }
             try {
-                const ollama = await (0,_request__rspack_import_6.requestAPI)('api/local-ai/status', app.serviceManager.serverSettings);
+                const ollama = await (0,_request__rspack_import_7.requestAPI)('api/local-ai/status', app.serviceManager.serverSettings);
                 if (ollama.status === 'connected' &&
                     ollama.model_status === 'available') {
                     ollamaConnected = true;
@@ -2579,7 +4187,7 @@ const plugin = {
             // ── Also auto-trigger the Tutor for every error ──
             if (error) {
                 _lastCapturedError = error;
-                void (0,_debugger_tutor__rspack_import_7.loadTutorExplanation)({
+                void (0,_debugger_tutor__rspack_import_8.loadTutorExplanation)({
                     error_type: error.error_type,
                     error_message: error.error_message,
                     traceback: error.traceback,
@@ -2587,7 +4195,7 @@ const plugin = {
                 }, app.serviceManager.serverSettings);
             }
             try {
-                const result = await (0,_request__rspack_import_6.requestAPI)('api/error/analyze', app.serviceManager.serverSettings, {
+                const result = await (0,_request__rspack_import_7.requestAPI)('api/error/analyze', app.serviceManager.serverSettings, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(error)
@@ -2601,7 +4209,7 @@ const plugin = {
                     if (!targetCell || !notebookPanel) {
                         throw new Error('Select a notebook cell first');
                     }
-                    const suggestion = await (0,_request__rspack_import_6.requestAPI)('api/ai/fix', app.serviceManager.serverSettings, {
+                    const suggestion = await (0,_request__rspack_import_7.requestAPI)('api/ai/fix', app.serviceManager.serverSettings, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
@@ -2638,10 +4246,10 @@ const plugin = {
                     if (!targetCell || !notebookPanel) {
                         throw new Error('Select a notebook cell first');
                     }
-                    if (!(0,_fix_utils__rspack_import_8.applyFixToCellModel)(targetCell.model, suggestion.candidate_code)) {
+                    if (!(0,_fix_utils__rspack_import_9.applyFixToCellModel)(targetCell.model, suggestion.candidate_code)) {
                         throw new Error('Could not update the failed cell');
                     }
-                    const executed = await _jupyterlab_notebook__rspack_import_2.NotebookActions.runCells(notebookPanel.content, [targetCell], notebookPanel.sessionContext);
+                    const executed = await _jupyterlab_notebook__rspack_import_3.NotebookActions.runCells(notebookPanel.content, [targetCell], notebookPanel.sessionContext);
                     if (!executed) {
                         throw new Error('Fix applied; cell could not be run');
                     }
@@ -2662,7 +4270,7 @@ const plugin = {
                     }, fixActions, analysisMode === 'suggest');
                     return;
                 }
-                const explanation = await (0,_request__rspack_import_6.requestAPI)('api/ai/explain', app.serviceManager.serverSettings, {
+                const explanation = await (0,_request__rspack_import_7.requestAPI)('api/ai/explain', app.serviceManager.serverSettings, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(error)
@@ -2731,7 +4339,7 @@ const plugin = {
                 askButton.disabled = true;
                 answer.textContent = 'Asking local Ollama...';
                 try {
-                    const result = await (0,_request__rspack_import_6.requestAPI)('api/ai/code-help', app.serviceManager.serverSettings, {
+                    const result = await (0,_request__rspack_import_7.requestAPI)('api/ai/code-help', app.serviceManager.serverSettings, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
@@ -2788,7 +4396,7 @@ const plugin = {
             }
             installButton.disabled = true;
             try {
-                const result = await (0,_request__rspack_import_6.requestAPI)('api/local-ai/install', app.serviceManager.serverSettings, {
+                const result = await (0,_request__rspack_import_7.requestAPI)('api/local-ai/install', app.serviceManager.serverSettings, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ allow_download: true })
@@ -2846,11 +4454,11 @@ const plugin = {
             }
         });
         // ── Initialise the AI Debugger Tutor FAB (bottom-right slide panel) ──
-        (0,_debugger_tutor__rspack_import_7.createFAB)(app.serviceManager.serverSettings);
+        (0,_debugger_tutor__rspack_import_8.createFAB)(app.serviceManager.serverSettings);
         // ═══════════════════════════════════════════════════════════
         // RIGHT SIDEBAR — AI Chatbot Panel
         // ═══════════════════════════════════════════════════════════
-        const chatbotWidget = new _lumino_widgets__rspack_import_4.Widget();
+        const chatbotWidget = new _lumino_widgets__rspack_import_5.Widget();
         chatbotWidget.id = 'mm-ai-chatbot-panel';
         chatbotWidget.title.label = '💬 AI Chat';
         chatbotWidget.title.caption = 'AI Chatbot — powered by Ollama & Gemini';
@@ -2867,7 +4475,512 @@ const plugin = {
             const cell = getTargetCell(notebooks);
             return captureActiveError(cell) || _lastCapturedError;
         };
-        const chatbotRoot = (0,_ai_chatbot__rspack_import_9.createAIChatbotPanel)(app.serviceManager.serverSettings, getActiveCodeForChat, getActiveErrorForChat);
+        const runCodeTraceForChat = async (source) => {
+            var _a, _b;
+            const kernel = (_b = (_a = notebooks.currentWidget) === null || _a === void 0 ? void 0 : _a.sessionContext.session) === null || _b === void 0 ? void 0 : _b.kernel;
+            if (!kernel || kernel.isDisposed) {
+                throw new Error('Start a notebook kernel before capturing an execution trace.');
+            }
+            const marker = `__MODELMIND_TRACE_${Date.now()}__:`;
+            const wrappedCode = `
+import json as _mm_json
+def _mm_trace_runner(_mm_source):
+    import sys as _mm_sys
+    import ast as _mm_ast
+    _mm_tracked_names = {node.id for node in _mm_ast.walk(_mm_ast.parse(_mm_source)) if isinstance(node, _mm_ast.Name)}
+    _mm_events = []
+    _mm_filename = '<modelmind-execution-trace>'
+    def _mm_trace(frame, event, arg):
+        if frame.f_code.co_filename != _mm_filename:
+            return None
+        if event == 'line':
+            if len(_mm_events) >= 1000:
+                raise RuntimeError('Trace stopped after 1,000 Python line events.')
+            _mm_variables = {}
+            for _mm_name, _mm_value in frame.f_locals.items():
+                if _mm_name not in _mm_tracked_names:
+                    continue
+                if isinstance(_mm_value, (str, int, float, bool, type(None))):
+                    _mm_value_text = repr(_mm_value)
+                elif isinstance(_mm_value, (list, tuple, dict)) and len(_mm_value) <= 8:
+                    if all(isinstance(_mm_item, (str, int, float, bool, type(None))) for _mm_item in (_mm_value.values() if isinstance(_mm_value, dict) else _mm_value)):
+                        _mm_value_text = repr(_mm_value)
+                    else:
+                        continue
+                elif type(_mm_value).__module__.startswith('pandas') and hasattr(_mm_value, 'shape'):
+                    _mm_value_text = '<' + type(_mm_value).__name__ + ' shape=' + str(_mm_value.shape) + '>'
+                elif type(_mm_value).__module__.startswith('numpy') and hasattr(_mm_value, 'item'):
+                    try:
+                        _mm_value_text = repr(_mm_value.item())
+                    except Exception:
+                        continue
+                else:
+                    continue
+                _mm_variables[_mm_name] = _mm_value_text[:100]
+                if len(_mm_variables) >= 12:
+                    break
+            _mm_events.append({'line': frame.f_lineno, 'functionName': frame.f_code.co_name, 'variables': _mm_variables})
+        return _mm_trace
+
+    _mm_previous_trace = _mm_sys.gettrace()
+    try:
+        _mm_sys.settrace(_mm_trace)
+        try:
+            exec(compile(_mm_source, _mm_filename, 'exec'), get_ipython().user_ns, get_ipython().user_ns)
+            return _mm_events, None
+        except BaseException as _mm_exc:
+            return _mm_events, type(_mm_exc).__name__ + ': ' + str(_mm_exc)
+    finally:
+        _mm_sys.settrace(_mm_previous_trace)
+
+_mm_events, _mm_error = _mm_trace_runner(${JSON.stringify(source)})
+print(${JSON.stringify(marker)} + _mm_json.dumps({'events': _mm_events, 'error': _mm_error}))
+del _mm_events, _mm_error, _mm_trace_runner, _mm_json
+`;
+            let capturedOutput = '';
+            const future = kernel.requestExecute({
+                code: wrappedCode,
+                silent: false,
+                store_history: false,
+                allow_stdin: false,
+                stop_on_error: true
+            });
+            future.onIOPub = message => {
+                var _a;
+                if (message.header.msg_type === 'stream') {
+                    capturedOutput += (_a = message.content.text) !== null && _a !== void 0 ? _a : '';
+                }
+            };
+            await future.done;
+            const markerIndex = capturedOutput.lastIndexOf(marker);
+            if (markerIndex < 0) {
+                throw new Error('The kernel did not return a trace. Check that it is responsive, then try again.');
+            }
+            const output = capturedOutput.slice(0, markerIndex).trim();
+            const payload = JSON.parse(capturedOutput.slice(markerIndex + marker.length).trim());
+            return {
+                events: Array.isArray(payload.events) ? payload.events : [],
+                output,
+                error: payload.error || undefined
+            };
+        };
+        const loadDecisionTreesForChat = async () => {
+            var _a, _b;
+            const kernel = (_b = (_a = notebooks.currentWidget) === null || _a === void 0 ? void 0 : _a.sessionContext.session) === null || _b === void 0 ? void 0 : _b.kernel;
+            if (!kernel || kernel.isDisposed) {
+                throw new Error('Start a notebook kernel and fit a decision tree before opening this view.');
+            }
+            const marker = `__MODELMIND_TREES_${Date.now()}__:`;
+            const code = `
+import json as _mm_json
+def _mm_describe_tree(_mm_name, _mm_estimator, _mm_namespace):
+    _mm_tree = _mm_estimator.tree_
+    _mm_task = 'classification' if hasattr(_mm_estimator, 'classes_') else 'regression'
+    _mm_class_values = getattr(_mm_estimator, 'classes_', [])
+    if hasattr(_mm_class_values, 'tolist'):
+        _mm_class_values = _mm_class_values.tolist()
+    _mm_feature_names = getattr(_mm_estimator, 'feature_names_in_', [])
+    if hasattr(_mm_feature_names, 'tolist'):
+        _mm_feature_names = _mm_feature_names.tolist()
+    if not _mm_feature_names:
+        for _mm_data_name in ('X_train', 'X', 'features'):
+            _mm_data = _mm_namespace.get(_mm_data_name)
+            if hasattr(_mm_data, 'columns'):
+                _mm_feature_names = [str(_mm_column) for _mm_column in _mm_data.columns]
+                break
+    _mm_depths = [0] * _mm_tree.node_count
+    _mm_stack = [(0, 0)]
+    while _mm_stack:
+        _mm_index, _mm_depth = _mm_stack.pop()
+        if _mm_index >= _mm_tree.node_count:
+            continue
+        _mm_depths[_mm_index] = _mm_depth
+        _mm_left = int(_mm_tree.children_left[_mm_index])
+        _mm_right = int(_mm_tree.children_right[_mm_index])
+        if _mm_left != _mm_right:
+            _mm_stack.append((_mm_right, _mm_depth + 1))
+            _mm_stack.append((_mm_left, _mm_depth + 1))
+    _mm_nodes = []
+    for _mm_index in range(int(_mm_tree.node_count)):
+        if _mm_depths[_mm_index] > 10:
+            continue
+        _mm_left = int(_mm_tree.children_left[_mm_index])
+        _mm_right = int(_mm_tree.children_right[_mm_index])
+        _mm_leaf = _mm_left == _mm_right
+        _mm_feature_index = int(_mm_tree.feature[_mm_index])
+        _mm_feature = str(_mm_feature_names[_mm_feature_index]) if 0 <= _mm_feature_index < len(_mm_feature_names) else 'feature_' + str(_mm_feature_index)
+        _mm_values = _mm_tree.value[_mm_index][0].tolist()
+        if _mm_task == 'classification' and _mm_values:
+            _mm_prediction_index = max(range(len(_mm_values)), key=lambda _mm_i: _mm_values[_mm_i])
+            _mm_prediction = str(_mm_class_values[_mm_prediction_index]) if _mm_prediction_index < len(_mm_class_values) else 'class ' + str(_mm_prediction_index)
+        else:
+            _mm_prediction = str(_mm_values[0]) if _mm_values else 'unknown'
+        _mm_nodes.append({
+            'id': _mm_index,
+            'depth': _mm_depths[_mm_index],
+            'left': None if _mm_leaf else _mm_left,
+            'right': None if _mm_leaf else _mm_right,
+            'feature': _mm_feature,
+            'threshold': None if _mm_leaf else float(_mm_tree.threshold[_mm_index]),
+            'samples': int(_mm_tree.n_node_samples[_mm_index]),
+            'impurity': float(_mm_tree.impurity[_mm_index]),
+            'prediction': _mm_prediction
+        })
+    return {
+        'modelName': _mm_name,
+        'task': _mm_task,
+        'criterion': str(getattr(_mm_estimator, 'criterion', 'tree split')),
+        'nodeCount': int(_mm_tree.node_count),
+        'maxDepth': int(_mm_tree.max_depth),
+        'nodes': _mm_nodes
+    }
+
+_mm_namespace = get_ipython().user_ns
+_mm_trees = []
+_mm_seen = set()
+for _mm_name, _mm_object in list(_mm_namespace.items()):
+    # IPython stores the previous cell result under _, __, and ___. These can
+    # point at an older fitted tree and should not appear as named user models.
+    if _mm_name.startswith('_') or _mm_name in ('In', 'Out'):
+        continue
+    _mm_candidates = [(_mm_name, _mm_object)]
+    for _mm_step_name, _mm_step in getattr(_mm_object, 'steps', []) or []:
+        _mm_candidates.append((_mm_name + '.' + str(_mm_step_name), _mm_step))
+    for _mm_candidate_name, _mm_candidate in _mm_candidates:
+        try:
+            _mm_tree_id = id(_mm_candidate)
+            if _mm_tree_id in _mm_seen or not hasattr(_mm_candidate, 'tree_'):
+                continue
+            _mm_seen.add(_mm_tree_id)
+            _mm_trees.append(_mm_describe_tree(_mm_candidate_name, _mm_candidate, _mm_namespace))
+        except Exception:
+            continue
+    if len(_mm_trees) >= 10:
+        break
+print(${JSON.stringify(marker)} + _mm_json.dumps(_mm_trees))
+for _mm_cleanup_name in ('_mm_describe_tree', '_mm_namespace', '_mm_trees', '_mm_seen', '_mm_name', '_mm_object', '_mm_candidates', '_mm_candidate_name', '_mm_candidate', '_mm_step_name', '_mm_step', '_mm_tree_id', '_mm_json'):
+    get_ipython().user_ns.pop(_mm_cleanup_name, None)
+`;
+            let capturedOutput = '';
+            const future = kernel.requestExecute({ code, silent: false, store_history: false, allow_stdin: false, stop_on_error: true });
+            future.onIOPub = message => {
+                var _a;
+                if (message.header.msg_type === 'stream') {
+                    capturedOutput += (_a = message.content.text) !== null && _a !== void 0 ? _a : '';
+                }
+            };
+            await future.done;
+            const markerIndex = capturedOutput.lastIndexOf(marker);
+            if (markerIndex < 0) {
+                throw new Error('Could not read a fitted tree from the current kernel. Confirm the model was fitted with scikit-learn.');
+            }
+            return JSON.parse(capturedOutput.slice(markerIndex + marker.length).trim());
+        };
+        const loadNeuralNetworksForChat = async () => {
+            var _a, _b;
+            const kernel = (_b = (_a = notebooks.currentWidget) === null || _a === void 0 ? void 0 : _a.sessionContext.session) === null || _b === void 0 ? void 0 : _b.kernel;
+            if (!kernel || kernel.isDisposed) {
+                throw new Error('Start a notebook kernel and fit a neural network before opening this view.');
+            }
+            const marker = `__MODELMIND_NEURAL_NETWORKS_${Date.now()}__:`;
+            const code = `
+import json as _mm_json
+def _mm_even_samples(_mm_size, _mm_limit=12):
+    if _mm_size <= _mm_limit:
+        return list(range(_mm_size))
+    return sorted(set(round(_mm_i * (_mm_size - 1) / (_mm_limit - 1)) for _mm_i in range(_mm_limit)))
+_mm_namespace = get_ipython().user_ns
+_mm_networks = []
+_mm_seen = set()
+for _mm_name, _mm_object in list(_mm_namespace.items()):
+    if _mm_name.startswith('_') or _mm_name in ('In', 'Out'):
+        continue
+    _mm_parent_features = getattr(_mm_object, 'feature_names_in_', [])
+    if hasattr(_mm_parent_features, 'tolist'):
+        _mm_parent_features = _mm_parent_features.tolist()
+    _mm_candidates = [(_mm_name, _mm_object, _mm_parent_features)]
+    for _mm_step_name, _mm_step in getattr(_mm_object, 'steps', []) or []:
+        _mm_candidates.append((_mm_name + '.' + str(_mm_step_name), _mm_step, _mm_parent_features))
+    for _mm_candidate_name, _mm_model, _mm_parent_feature_names in _mm_candidates:
+        try:
+            _mm_kind = type(_mm_model).__name__
+            if _mm_kind not in ('MLPClassifier', 'MLPRegressor') or not hasattr(_mm_model, 'coefs_'):
+                continue
+            if id(_mm_model) in _mm_seen:
+                continue
+            _mm_seen.add(id(_mm_model))
+            _mm_coefs = _mm_model.coefs_
+            _mm_sizes = [int(_mm_coefs[0].shape[0])] + [int(_mm_matrix.shape[1]) for _mm_matrix in _mm_coefs]
+            _mm_indices = [_mm_even_samples(_mm_size) for _mm_size in _mm_sizes]
+            _mm_features = getattr(_mm_model, 'feature_names_in_', [])
+            if hasattr(_mm_features, 'tolist'):
+                _mm_features = _mm_features.tolist()
+            if len(_mm_features) != _mm_sizes[0]:
+                _mm_features = _mm_parent_feature_names
+            if len(_mm_features) != _mm_sizes[0]:
+                _mm_features = []
+                for _mm_data_name in ('X_train_scaled', 'X_train', 'X', 'features'):
+                    _mm_data = _mm_namespace.get(_mm_data_name)
+                    if hasattr(_mm_data, 'columns') and len(_mm_data.columns) == _mm_sizes[0]:
+                        _mm_features = [str(_mm_column) for _mm_column in _mm_data.columns]
+                        break
+            _mm_classes = getattr(_mm_model, 'classes_', [])
+            if hasattr(_mm_classes, 'tolist'):
+                _mm_classes = _mm_classes.tolist()
+            _mm_layers = []
+            for _mm_layer_index, _mm_size in enumerate(_mm_sizes):
+                if _mm_layer_index == 0:
+                    _mm_label = 'Input'
+                elif _mm_layer_index == len(_mm_sizes) - 1:
+                    _mm_label = 'Output'
+                else:
+                    _mm_label = 'Hidden ' + str(_mm_layer_index)
+                _mm_nodes = []
+                for _mm_node_index in _mm_indices[_mm_layer_index]:
+                    _mm_node_label = 'unit ' + str(_mm_node_index)
+                    if _mm_layer_index == 0 and len(_mm_features) == _mm_size:
+                        _mm_node_label = str(_mm_features[_mm_node_index])
+                    elif _mm_layer_index == len(_mm_sizes) - 1 and len(_mm_classes) == _mm_size:
+                        _mm_node_label = str(_mm_classes[_mm_node_index])
+                    _mm_nodes.append({'index': int(_mm_node_index), 'label': _mm_node_label})
+                _mm_layers.append({'label': _mm_label, 'size': _mm_size, 'nodes': _mm_nodes})
+            _mm_connections = []
+            for _mm_layer_index, _mm_matrix in enumerate(_mm_coefs):
+                for _mm_from_index in _mm_indices[_mm_layer_index]:
+                    for _mm_to_index in _mm_indices[_mm_layer_index + 1]:
+                        _mm_connections.append({
+                            'fromLayer': _mm_layer_index,
+                            'fromNode': int(_mm_from_index),
+                            'toNode': int(_mm_to_index),
+                            'weight': float(_mm_matrix[_mm_from_index, _mm_to_index])
+                        })
+            _mm_networks.append({
+                'modelName': _mm_candidate_name,
+                'modelType': _mm_kind,
+                'task': 'classification' if _mm_kind == 'MLPClassifier' else 'regression',
+                'activation': str(getattr(_mm_model, 'activation', 'unknown')),
+                'outputActivation': str(getattr(_mm_model, 'out_activation_', 'unknown')),
+                'loss': str(getattr(_mm_model, 'loss_', 'unknown')),
+                'epochs': int(getattr(_mm_model, 'n_iter_', 0)),
+                'layers': _mm_layers,
+                'connections': _mm_connections,
+                'classes': [str(_mm_class) for _mm_class in _mm_classes]
+            })
+        except Exception:
+            continue
+    if len(_mm_networks) >= 10:
+        break
+print(${JSON.stringify(marker)} + _mm_json.dumps(_mm_networks))
+for _mm_cleanup_name in ('_mm_even_samples', '_mm_namespace', '_mm_networks', '_mm_seen', '_mm_name', '_mm_object', '_mm_parent_features', '_mm_candidates', '_mm_step_name', '_mm_step', '_mm_candidate_name', '_mm_model', '_mm_parent_feature_names', '_mm_kind', '_mm_coefs', '_mm_sizes', '_mm_indices', '_mm_features', '_mm_data_name', '_mm_data', '_mm_column', '_mm_classes', '_mm_layers', '_mm_layer_index', '_mm_size', '_mm_label', '_mm_nodes', '_mm_node_index', '_mm_node_label', '_mm_connections', '_mm_matrix', '_mm_from_index', '_mm_to_index', '_mm_json'):
+    get_ipython().user_ns.pop(_mm_cleanup_name, None)
+`;
+            let capturedOutput = '';
+            const future = kernel.requestExecute({ code, silent: false, store_history: false, allow_stdin: false, stop_on_error: true });
+            future.onIOPub = message => {
+                var _a;
+                if (message.header.msg_type === 'stream') {
+                    capturedOutput += (_a = message.content.text) !== null && _a !== void 0 ? _a : '';
+                }
+            };
+            await future.done;
+            const markerIndex = capturedOutput.lastIndexOf(marker);
+            if (markerIndex < 0) {
+                throw new Error('Could not inspect fitted neural networks. Fit a scikit-learn MLPClassifier or MLPRegressor first.');
+            }
+            return JSON.parse(capturedOutput.slice(markerIndex + marker.length).trim());
+        };
+        const loadTrainingSourcesForChat = async () => {
+            var _a, _b;
+            const kernel = (_b = (_a = notebooks.currentWidget) === null || _a === void 0 ? void 0 : _a.sessionContext.session) === null || _b === void 0 ? void 0 : _b.kernel;
+            if (!kernel || kernel.isDisposed) {
+                throw new Error('Start a notebook kernel and define feature and target variables before training.');
+            }
+            const marker = `__MODELMIND_TRAINING_SOURCES_${Date.now()}__:`;
+            const code = `
+import json as _mm_json
+from sklearn.utils.multiclass import type_of_target as _mm_type_of_target
+_mm_ns = get_ipython().user_ns
+_mm_pairs = [
+    ('X_train', 'y_train', 'X_test', 'y_test'),
+    ('X_train_scaled', 'y_train', 'X_test_scaled', 'y_test'),
+    ('X', 'y', None, None),
+    ('features', 'target', None, None)
+]
+_mm_sources = []
+_mm_seen = set()
+for _mm_x_name, _mm_y_name, _mm_x_test_name, _mm_y_test_name in _mm_pairs:
+    _mm_key = (_mm_x_name, _mm_y_name)
+    if _mm_key in _mm_seen:
+        continue
+    _mm_seen.add(_mm_key)
+    _mm_x = _mm_ns.get(_mm_x_name)
+    _mm_y = _mm_ns.get(_mm_y_name)
+    if _mm_x is None or _mm_y is None:
+        continue
+    try:
+        _mm_rows = len(_mm_x)
+        _mm_features = int(_mm_x.shape[1])
+        if _mm_rows < 5 or _mm_features < 1 or len(_mm_y) != _mm_rows:
+            continue
+        _mm_target_kind = _mm_type_of_target(_mm_y)
+        if _mm_target_kind in ('binary', 'multiclass'):
+            _mm_task = 'classification'
+        elif _mm_target_kind in ('continuous', 'continuous-multioutput'):
+            _mm_task = 'regression'
+        else:
+            continue
+        _mm_has_test = bool(_mm_x_test_name and _mm_y_test_name and _mm_ns.get(_mm_x_test_name) is not None and _mm_ns.get(_mm_y_test_name) is not None)
+        _mm_sources.append({
+            'id': _mm_x_name + '|' + _mm_y_name,
+            'featuresName': _mm_x_name,
+            'targetName': _mm_y_name,
+            'testFeaturesName': _mm_x_test_name if _mm_has_test else None,
+            'testTargetName': _mm_y_test_name if _mm_has_test else None,
+            'rows': _mm_rows,
+            'featureCount': _mm_features,
+            'task': _mm_task
+        })
+    except Exception:
+        continue
+print(${JSON.stringify(marker)} + _mm_json.dumps(_mm_sources))
+for _mm_cleanup in ('_mm_type_of_target', '_mm_ns', '_mm_pairs', '_mm_sources', '_mm_seen', '_mm_x_name', '_mm_y_name', '_mm_x_test_name', '_mm_y_test_name', '_mm_key', '_mm_x', '_mm_y', '_mm_rows', '_mm_features', '_mm_target_kind', '_mm_task', '_mm_has_test', '_mm_json'):
+    get_ipython().user_ns.pop(_mm_cleanup, None)
+`;
+            let capturedOutput = '';
+            const future = kernel.requestExecute({ code, silent: false, store_history: false, allow_stdin: false, stop_on_error: true });
+            future.onIOPub = message => {
+                var _a;
+                if (message.header.msg_type === 'stream')
+                    capturedOutput += (_a = message.content.text) !== null && _a !== void 0 ? _a : '';
+            };
+            await future.done;
+            const markerIndex = capturedOutput.lastIndexOf(marker);
+            if (markerIndex < 0)
+                throw new Error('Could not inspect feature/target variables in the current kernel.');
+            return JSON.parse(capturedOutput.slice(markerIndex + marker.length).trim());
+        };
+        const trainModelInNotebook = async (sourceId, modelType) => {
+            var _a, _b;
+            const kernel = (_b = (_a = notebooks.currentWidget) === null || _a === void 0 ? void 0 : _a.sessionContext.session) === null || _b === void 0 ? void 0 : _b.kernel;
+            if (!kernel || kernel.isDisposed)
+                throw new Error('Start a notebook kernel before training a model.');
+            const [featuresName, targetName] = sourceId.split('|');
+            if (!featuresName || !targetName)
+                throw new Error('Choose a valid feature and target pair.');
+            if (!['decision_tree', 'random_forest', 'neural_network'].includes(modelType))
+                throw new Error('Choose a supported model type.');
+            const marker = `__MODELMIND_TRAINED_MODEL_${Date.now()}__:`;
+            const params = JSON.stringify({ featuresName, targetName, modelType });
+            const code = `
+import json as _mm_json
+import numpy as _mm_np
+from sklearn.model_selection import train_test_split as _mm_train_test_split
+from sklearn.utils.multiclass import type_of_target as _mm_type_of_target
+from sklearn.metrics import accuracy_score as _mm_accuracy, f1_score as _mm_f1, mean_absolute_error as _mm_mae, mean_squared_error as _mm_mse, r2_score as _mm_r2
+from sklearn.tree import DecisionTreeClassifier as _mm_DTC, DecisionTreeRegressor as _mm_DTR
+from sklearn.ensemble import RandomForestClassifier as _mm_RFC, RandomForestRegressor as _mm_RFR
+from sklearn.neural_network import MLPClassifier as _mm_MLPC, MLPRegressor as _mm_MLPR
+from sklearn.pipeline import make_pipeline as _mm_make_pipeline
+from sklearn.preprocessing import StandardScaler as _mm_StandardScaler
+_mm_args = _mm_json.loads(${JSON.stringify(params)})
+_mm_ns = get_ipython().user_ns
+_mm_X = _mm_ns.get(_mm_args['featuresName'])
+_mm_y = _mm_ns.get(_mm_args['targetName'])
+if _mm_X is None or _mm_y is None:
+    raise ValueError('The selected feature/target variables are no longer available. Run their notebook cells again.')
+if len(_mm_X) != len(_mm_y):
+    raise ValueError('Features and target have different row counts.')
+if hasattr(_mm_X, 'select_dtypes'):
+    _mm_bad = list(_mm_X.select_dtypes(include=['object', 'string', 'category']).columns)
+    if _mm_bad:
+        raise ValueError('Encode categorical feature columns first (for example, with pd.get_dummies(X)).')
+elif getattr(_mm_X, 'dtype', None) is not None and _mm_X.dtype.kind not in 'biufc':
+    raise ValueError('Encode categorical feature columns first (for example, with pd.get_dummies(X)).')
+_mm_target_kind = _mm_type_of_target(_mm_y)
+if _mm_target_kind in ('binary', 'multiclass'):
+    _mm_task = 'classification'
+elif _mm_target_kind in ('continuous', 'continuous-multioutput'):
+    _mm_task = 'regression'
+else:
+    raise ValueError('This target type is not supported. Use a one-dimensional classification or regression target.')
+_mm_X_test = None
+_mm_y_test = None
+_mm_test_x_name = _mm_args['featuresName'].replace('X_train_scaled', 'X_test_scaled').replace('X_train', 'X_test')
+_mm_test_y_name = _mm_args['targetName'].replace('y_train', 'y_test')
+if _mm_args['featuresName'] in ('X_train', 'X_train_scaled') and _mm_test_x_name != _mm_args['featuresName']:
+    _mm_X_test = _mm_ns.get(_mm_test_x_name)
+    _mm_y_test = _mm_ns.get(_mm_test_y_name)
+if _mm_X_test is not None and _mm_y_test is not None:
+    _mm_X_train, _mm_y_train = _mm_X, _mm_y
+    if len(_mm_X_test) != len(_mm_y_test):
+        raise ValueError('The existing test features and target have different row counts.')
+else:
+    _mm_stratify = None
+    if _mm_task == 'classification':
+        _mm_values, _mm_counts = _mm_np.unique(_mm_y, return_counts=True)
+        if len(_mm_counts) > 1 and _mm_counts.min() >= 2:
+            _mm_stratify = _mm_y
+    _mm_X_train, _mm_X_test, _mm_y_train, _mm_y_test = _mm_train_test_split(
+        _mm_X, _mm_y, test_size=0.2, random_state=42, stratify=_mm_stratify
+    )
+_mm_type = _mm_args['modelType']
+if _mm_task == 'classification':
+    if _mm_type == 'decision_tree': _mm_estimator = _mm_DTC(max_depth=6, random_state=42)
+    elif _mm_type == 'random_forest': _mm_estimator = _mm_RFC(n_estimators=150, random_state=42, n_jobs=-1)
+    else: _mm_estimator = _mm_make_pipeline(_mm_StandardScaler(with_mean=False), _mm_MLPC(hidden_layer_sizes=(32, 16), max_iter=500, random_state=42))
+else:
+    if _mm_type == 'decision_tree': _mm_estimator = _mm_DTR(max_depth=6, random_state=42)
+    elif _mm_type == 'random_forest': _mm_estimator = _mm_RFR(n_estimators=150, random_state=42, n_jobs=-1)
+    else: _mm_estimator = _mm_make_pipeline(_mm_StandardScaler(with_mean=False), _mm_MLPR(hidden_layer_sizes=(32, 16), max_iter=500, random_state=42))
+_mm_estimator.fit(_mm_X_train, _mm_y_train)
+_mm_prediction = _mm_estimator.predict(_mm_X_test)
+if _mm_task == 'classification':
+    _mm_primary = float(_mm_accuracy(_mm_y_test, _mm_prediction))
+    _mm_metric = 'Accuracy'
+    _mm_secondary = [{'label': 'Macro F1', 'value': float(_mm_f1(_mm_y_test, _mm_prediction, average='macro', zero_division=0))}]
+else:
+    _mm_primary = float(_mm_r2(_mm_y_test, _mm_prediction))
+    _mm_metric = 'R²'
+    _mm_secondary = [
+        {'label': 'MAE', 'value': float(_mm_mae(_mm_y_test, _mm_prediction))},
+        {'label': 'RMSE', 'value': float(_mm_np.sqrt(_mm_mse(_mm_y_test, _mm_prediction)))}
+    ]
+_mm_ns['modelmind_trained_model'] = _mm_estimator
+_mm_result = {
+    'modelName': 'modelmind_trained_model',
+    'modelType': _mm_type.replace('_', ' ').title(),
+    'task': _mm_task,
+    'trainRows': int(len(_mm_X_train)),
+    'testRows': int(len(_mm_X_test)),
+    'featureCount': int(_mm_X.shape[1]),
+    'primaryMetric': _mm_metric,
+    'primaryScore': _mm_primary,
+    'secondaryMetrics': _mm_secondary
+}
+print(${JSON.stringify(marker)} + _mm_json.dumps(_mm_result))
+for _mm_cleanup in ('_mm_args', '_mm_ns', '_mm_X', '_mm_y', '_mm_bad', '_mm_target_kind', '_mm_task', '_mm_X_test', '_mm_y_test', '_mm_test_x_name', '_mm_test_y_name', '_mm_stratify', '_mm_values', '_mm_counts', '_mm_X_train', '_mm_y_train', '_mm_type', '_mm_estimator', '_mm_prediction', '_mm_primary', '_mm_metric', '_mm_secondary', '_mm_result', '_mm_json', '_mm_np', '_mm_train_test_split', '_mm_type_of_target', '_mm_accuracy', '_mm_f1', '_mm_mae', '_mm_mse', '_mm_r2', '_mm_DTC', '_mm_DTR', '_mm_RFC', '_mm_RFR', '_mm_MLPC', '_mm_MLPR', '_mm_make_pipeline', '_mm_StandardScaler'):
+    get_ipython().user_ns.pop(_mm_cleanup, None)
+`;
+            let capturedOutput = '';
+            let executionError = '';
+            const future = kernel.requestExecute({ code, silent: false, store_history: false, allow_stdin: false, stop_on_error: true });
+            future.onIOPub = message => {
+                var _a, _b;
+                if (message.header.msg_type === 'stream')
+                    capturedOutput += (_a = message.content.text) !== null && _a !== void 0 ? _a : '';
+                if (message.header.msg_type === 'error')
+                    executionError = (_b = message.content.evalue) !== null && _b !== void 0 ? _b : 'Python training failed.';
+            };
+            await future.done;
+            const markerIndex = capturedOutput.lastIndexOf(marker);
+            if (markerIndex < 0)
+                throw new Error(executionError || 'Python training did not return evaluation results.');
+            // The kernel can emit a warning or other stream text after our result marker.
+            // The trainer serializes its payload as one compact JSON line, so parse that line only.
+            const payloadLine = capturedOutput.slice(markerIndex + marker.length).replace(/^\s+/, '').split(/\r?\n/, 1)[0];
+            return JSON.parse(payloadLine);
+        };
+        const chatbotRoot = (0,_ai_chatbot__rspack_import_10.createAIChatbotPanel)(app.serviceManager.serverSettings, getActiveCodeForChat, getActiveErrorForChat, runCodeTraceForChat, loadDecisionTreesForChat, loadNeuralNetworksForChat, loadTrainingSourcesForChat, trainModelInNotebook);
         chatbotWidget.node.style.cssText = 'height:100%;overflow:hidden;';
         chatbotWidget.node.appendChild(chatbotRoot);
         app.shell.add(chatbotWidget, 'right', { rank: 800 });
@@ -2876,7 +4989,7 @@ const plugin = {
         // No click required — the moment a cell produces an error,
         // the Tutor panel opens and explains it automatically.
         // ═══════════════════════════════════════════════════════════
-        _jupyterlab_notebook__rspack_import_2.NotebookActions.executed.connect((_, args) => {
+        _jupyterlab_notebook__rspack_import_3.NotebookActions.executed.connect((_, args) => {
             const { cell, success } = args;
             if (success)
                 return; // only handle failures
@@ -2884,7 +4997,7 @@ const plugin = {
                 const error = captureActiveError(cell);
                 if (error) {
                     _lastCapturedError = error;
-                    void (0,_debugger_tutor__rspack_import_7.loadTutorExplanation)({
+                    void (0,_debugger_tutor__rspack_import_8.loadTutorExplanation)({
                         error_type: error.error_type,
                         error_message: error.error_message,
                         traceback: error.traceback,
@@ -2896,9 +5009,9 @@ const plugin = {
         // ═══════════════════════════════════════════════════════════
         // LEFT SIDEBAR — Unified ModelMind Studio Panel (Single Slide Bar)
         // ═══════════════════════════════════════════════════════════
-        const studioWidget = (0,_modelmind_studio__rspack_import_10.createModelMindStudioWidget)(app, notebooks);
+        const studioWidget = (0,_modelmind_studio__rspack_import_11.createModelMindStudioWidget)(app, notebooks);
         app.shell.add(studioWidget, 'left', { rank: 300 });
-        const apiKeyWidget = (0,_api_key_settings__rspack_import_11.createAPIKeySettingsWidget)(app.serviceManager.serverSettings, trans);
+        const apiKeyWidget = (0,_api_key_settings__rspack_import_12.createAPIKeySettingsWidget)(app.serviceManager.serverSettings, trans);
         apiKeyWidget.title.label = '🔑 API Key';
         apiKeyWidget.title.caption = trans.__('Save Gemini credentials in this computer’s credential store');
         app.shell.add(apiKeyWidget, 'right', { rank: 700 });
@@ -2911,6 +5024,35 @@ const plugin = {
             }
         });
         mainMenu.viewMenu.addGroup([{ command: STUDIO_COMMAND }], 899);
+        const createNotebook = async (role) => {
+            const notebook = await documentManager.newUntitled({
+                type: 'notebook'
+            });
+            const widget = documentManager.open(notebook.path);
+            if (!widget) {
+                throw new Error(`Could not open the new ${role} notebook.`);
+            }
+            if (!(widget instanceof _jupyterlab_notebook__rspack_import_3.NotebookPanel)) {
+                throw new Error(`The new ${role} document is not a notebook.`);
+            }
+            await widget.context.ready;
+            widget.context.model.setMetadata(_notebook_mode__rspack_import_13.MODEL_MIND_NOTEBOOK_TYPE, role);
+            studioWidget.refreshNotebookMode();
+        };
+        const MODEL_MIND_NOTEBOOK_COMMAND = 'modelmind:create-modelmind-notebook';
+        app.commands.addCommand(MODEL_MIND_NOTEBOOK_COMMAND, {
+            label: 'ModelMind Notebook',
+            execute: () => createNotebook('modelmind')
+        });
+        const TRAINER_NOTEBOOK_COMMAND = 'modelmind:create-trainer-notebook';
+        app.commands.addCommand(TRAINER_NOTEBOOK_COMMAND, {
+            label: 'Trainer Notebook',
+            execute: () => createNotebook('trainer')
+        });
+        mainMenu.fileMenu.newMenu.addGroup([
+            { command: MODEL_MIND_NOTEBOOK_COMMAND },
+            { command: TRAINER_NOTEBOOK_COMMAND }
+        ], 899);
         // ─── Inject CSS for all left panels ───
         if (!document.getElementById('mm-left-panel-styles')) {
             const s = document.createElement('style');
@@ -3128,6 +5270,358 @@ function setupLeftSidebarSectionLabels() {
 
 
 },
+"./lib/model-advisor-explanations.js"(__unused_rspack_module, __webpack_exports__, __webpack_require__) {
+__webpack_require__.r(__webpack_exports__);
+__webpack_require__.d(__webpack_exports__, {
+  buildMeasuredModelExplanation: () => (buildMeasuredModelExplanation)
+});
+const MODEL_PROFILES = {
+    'linear regression': {
+        classification: 'Fits a linear combination of features to predict a numeric target.',
+        regression: 'Fits a linear relationship between the input features and numeric target, providing a clear baseline.',
+        strengths: [
+            'Simple, fast baseline',
+            'Coefficients are straightforward to inspect'
+        ],
+        weaknesses: [
+            'Cannot model nonlinear patterns without feature engineering',
+            'Sensitive to outliers and correlated features'
+        ],
+        bestFor: 'Numeric targets with approximately linear feature relationships.',
+        trainingSpeed: 'Fast',
+        complexity: 'Low',
+        interpretability: 'High'
+    },
+    'ridge regression': {
+        classification: 'Uses L2-regularized linear scores to separate classes.',
+        regression: 'Adds L2 regularization to linear regression, shrinking coefficients to stabilize correlated or numerous features.',
+        strengths: [
+            'Regularization can stabilize correlated features',
+            'Fast linear baseline'
+        ],
+        weaknesses: [
+            'Still assumes a linear relationship',
+            'Does not usually remove features entirely'
+        ],
+        bestFor: 'Numeric targets with mostly linear structure and correlated features.',
+        trainingSpeed: 'Fast',
+        complexity: 'Low',
+        interpretability: 'High'
+    },
+    'lasso regression': {
+        classification: 'Uses L1-regularized linear scores to separate classes.',
+        regression: 'Uses L1 regularization, which can shrink weak linear coefficients to zero and produce a sparse model.',
+        strengths: ['Can create sparse feature sets', 'Fast linear model'],
+        weaknesses: [
+            'May be unstable with strongly correlated features',
+            'Cannot learn nonlinear relationships by itself'
+        ],
+        bestFor: 'Approximately linear numeric targets where a compact set of predictors is useful.',
+        trainingSpeed: 'Fast',
+        complexity: 'Low',
+        interpretability: 'High'
+    },
+    'elastic net': {
+        classification: 'Combines L1 and L2 regularization for a linear classification boundary.',
+        regression: 'Combines L1 and L2 regularization to balance sparse coefficients with stability across correlated predictors.',
+        strengths: [
+            'Balances sparsity and coefficient stability',
+            'Useful when predictors are correlated'
+        ],
+        weaknesses: [
+            'Requires tuning regularization strength and mix',
+            'Assumes a linear relationship'
+        ],
+        bestFor: 'Linear numeric problems with many or correlated features.',
+        trainingSpeed: 'Fast',
+        complexity: 'Low–Medium',
+        interpretability: 'High'
+    },
+    'logistic regression': {
+        classification: 'Estimates class probabilities from a regularized linear decision boundary, making it a strong, efficient classification baseline.',
+        regression: 'Uses a linear score for numeric predictions.',
+        strengths: [
+            'Fast probability-based classification baseline',
+            'Coefficients are inspectable'
+        ],
+        weaknesses: [
+            'Linear boundary can miss nonlinear class structure',
+            'May need feature scaling and feature engineering'
+        ],
+        bestFor: 'Classification with a roughly linear class boundary or when probability estimates are useful.',
+        trainingSpeed: 'Fast',
+        complexity: 'Low',
+        interpretability: 'High'
+    },
+    'ridge classifier': {
+        classification: 'Applies regularized linear decision functions, which can generalize well when many features contribute modestly.',
+        regression: 'Uses regularized linear scores for numeric prediction.',
+        strengths: [
+            'Regularization helps with many or correlated features',
+            'Efficient linear classifier'
+        ],
+        weaknesses: [
+            'Decision boundary is linear',
+            'Does not provide calibrated probabilities by default'
+        ],
+        bestFor: 'High-dimensional classification with an approximately linear boundary.',
+        trainingSpeed: 'Fast',
+        complexity: 'Low',
+        interpretability: 'High'
+    },
+    'decision tree': {
+        classification: 'Builds threshold-based if/then splits that can represent nonlinear boundaries and feature interactions without requiring feature scaling.',
+        regression: 'Builds threshold-based if/then splits that can represent nonlinear target patterns without requiring feature scaling.',
+        strengths: [
+            'Captures nonlinear patterns and interactions',
+            'Rules are relatively easy to visualize'
+        ],
+        weaknesses: [
+            'A single tree can vary substantially with small data changes',
+            'Deep trees can overfit'
+        ],
+        bestFor: 'Nonlinear tabular data when rule-like decisions and little preprocessing are valuable.',
+        trainingSpeed: 'Fast',
+        complexity: 'Low–Medium',
+        interpretability: 'High'
+    },
+    'random forest': {
+        classification: 'Averages many bootstrapped decision trees, reducing the instability of a single tree while learning nonlinear interactions.',
+        regression: 'Averages many bootstrapped decision trees, reducing the variance of a single tree for nonlinear numeric patterns.',
+        strengths: [
+            'Captures nonlinear patterns with reduced single-tree variance',
+            'Usually works without feature scaling'
+        ],
+        weaknesses: [
+            'Less transparent than one tree',
+            'Model size and training time grow with the forest'
+        ],
+        bestFor: 'General-purpose nonlinear tabular prediction where robustness is more important than a single compact rule set.',
+        trainingSpeed: 'Moderate',
+        complexity: 'Medium',
+        interpretability: 'Low–Medium'
+    },
+    'extra trees': {
+        classification: 'Averages trees built with extra-randomized split thresholds; this decorrelation can reduce variance while retaining nonlinear decision boundaries.',
+        regression: 'Averages trees built with extra-randomized split thresholds; the additional randomness can reduce variance in nonlinear regression.',
+        strengths: [
+            'Randomized trees capture nonlinear patterns',
+            'Ensembling can make predictions less sensitive to one tree'
+        ],
+        weaknesses: [
+            'Individual decisions are difficult to explain',
+            'Randomized splits can trade some fit for lower variance'
+        ],
+        bestFor: 'Nonlinear tabular data where a fast, randomized tree ensemble is worth testing.',
+        trainingSpeed: 'Moderate–Fast',
+        complexity: 'Medium',
+        interpretability: 'Low'
+    },
+    'gradient boosting': {
+        classification: 'Adds shallow trees sequentially, with later trees correcting errors from earlier ones; this can capture structured nonlinearities.',
+        regression: 'Adds trees sequentially to reduce prior prediction errors, fitting nonlinear numeric patterns through a series of small corrections.',
+        strengths: [
+            'Learns nonlinear patterns through sequential corrections',
+            'Can perform well on structured tabular data'
+        ],
+        weaknesses: [
+            'Learning rate and tree count need care',
+            'Can overfit and is usually slower than simple baselines'
+        ],
+        bestFor: 'Tabular data with nonlinear structure when a carefully regularized boosted-tree model is useful.',
+        trainingSpeed: 'Moderate',
+        complexity: 'Medium–High',
+        interpretability: 'Low'
+    },
+    'hist gradient boosting': {
+        classification: 'Uses histogram-binned gradient-boosted trees to model nonlinear patterns efficiently on larger tabular datasets.',
+        regression: 'Uses histogram-binned gradient-boosted trees to model nonlinear numeric patterns efficiently on larger tabular datasets.',
+        strengths: [
+            'Histogram binning can speed up boosted-tree training',
+            'Learns nonlinear feature interactions'
+        ],
+        weaknesses: [
+            'Less transparent than linear models or a shallow tree',
+            'Performance depends on depth, leaves, and regularization'
+        ],
+        bestFor: 'Medium-to-large tabular datasets with nonlinear relationships where efficient boosting is useful.',
+        trainingSpeed: 'Moderate–Fast',
+        complexity: 'Medium–High',
+        interpretability: 'Low'
+    },
+    'k nearest neighbors': {
+        classification: 'Predicts from nearby training examples, so it can capture local patterns without fitting a global decision formula.',
+        regression: 'Predicts from nearby training examples, so it can represent local rather than global numeric patterns.',
+        strengths: [
+            'Simple, flexible local decision rule',
+            'Few assumptions about the global shape of the data'
+        ],
+        weaknesses: [
+            'Requires feature scaling',
+            'Prediction can be slow and sensitive to irrelevant features'
+        ],
+        bestFor: 'Smaller datasets where similarity in a well-scaled feature space is meaningful.',
+        trainingSpeed: 'Fast fit; slower predict',
+        complexity: 'Low',
+        interpretability: 'Medium'
+    },
+    'linear svm': {
+        classification: 'Finds a maximum-margin linear class boundary, which can be effective when classes separate in a high-dimensional feature space.',
+        regression: 'Uses a linear support-vector boundary for numeric prediction.',
+        strengths: [
+            'Strong linear classifier for many-feature datasets',
+            'Margin regularization controls model flexibility'
+        ],
+        weaknesses: [
+            'Cannot learn nonlinear boundaries without feature transformations',
+            'Requires feature scaling and careful regularization'
+        ],
+        bestFor: 'High-dimensional classification with a roughly linear boundary and scaled features.',
+        trainingSpeed: 'Moderate',
+        complexity: 'Medium',
+        interpretability: 'Low–Medium'
+    },
+    'rbf svm': {
+        classification: 'Uses a radial-basis kernel to form nonlinear class boundaries when a linear separator is too restrictive.',
+        regression: 'Uses an RBF kernel to fit smooth nonlinear numeric relationships.',
+        strengths: [
+            'Can model nonlinear boundaries',
+            'Effective on small-to-medium datasets with scaled features'
+        ],
+        weaknesses: [
+            'Requires feature scaling and tuning of C/gamma',
+            'Training can become costly as row count grows'
+        ],
+        bestFor: 'Small-to-medium datasets with nonlinear structure and meaningful scaled distances.',
+        trainingSpeed: 'Moderate–Slow',
+        complexity: 'Medium–High',
+        interpretability: 'Low'
+    },
+    'support vector regression': {
+        classification: 'Uses a support-vector margin for classification.',
+        regression: 'Fits an RBF support-vector function with an epsilon-insensitive loss, allowing nonlinear regression while controlling margin complexity.',
+        strengths: [
+            'Can model smooth nonlinear numeric patterns',
+            'Epsilon loss ignores small residuals'
+        ],
+        weaknesses: [
+            'Requires feature scaling and C/epsilon tuning',
+            'Training can be slow on large datasets'
+        ],
+        bestFor: 'Small-to-medium numeric datasets with smooth nonlinear relationships.',
+        trainingSpeed: 'Moderate–Slow',
+        complexity: 'Medium–High',
+        interpretability: 'Low'
+    },
+    'gaussian naive bayes': {
+        classification: 'Estimates class likelihoods under a conditional-independence and per-feature Gaussian assumption, making it a fast probabilistic baseline.',
+        regression: 'Uses a Gaussian likelihood model for classification-style prediction.',
+        strengths: [
+            'Very fast and works with small datasets',
+            'Provides class probabilities'
+        ],
+        weaknesses: [
+            'Conditional-independence and Gaussian assumptions may be inaccurate',
+            'Correlated features can reduce effectiveness'
+        ],
+        bestFor: 'Fast classification baselines, especially when feature likelihood assumptions are reasonable.',
+        trainingSpeed: 'Very fast',
+        complexity: 'Low',
+        interpretability: 'Medium'
+    },
+    'xgboost classifier': {
+        classification: 'Uses regularized gradient-boosted trees with efficient histogram training to learn nonlinear class boundaries and feature interactions.',
+        regression: 'Uses regularized gradient-boosted trees for numeric prediction.',
+        strengths: [
+            'Flexible nonlinear tabular model',
+            'Regularization and subsampling offer overfit controls'
+        ],
+        weaknesses: [
+            'More parameters to tune and less transparent than simple models',
+            'Requires the optional XGBoost package'
+        ],
+        bestFor: 'Structured classification data where a regularized boosted-tree model is worth comparing against simpler baselines.',
+        trainingSpeed: 'Moderate–Fast',
+        complexity: 'High',
+        interpretability: 'Low'
+    },
+    'xgboost regressor': {
+        classification: 'Uses regularized gradient-boosted trees for classification.',
+        regression: 'Uses regularized gradient-boosted trees to learn nonlinear numeric patterns, with depth, learning rate, and regularization controlling model complexity.',
+        strengths: [
+            'Flexible nonlinear tabular model',
+            'Regularization and subsampling offer overfit controls'
+        ],
+        weaknesses: [
+            'More parameters to tune and less transparent than simple models',
+            'Requires the optional XGBoost package'
+        ],
+        bestFor: 'Structured numeric prediction where a regularized boosted-tree model is worth comparing against simpler baselines.',
+        trainingSpeed: 'Moderate–Fast',
+        complexity: 'High',
+        interpretability: 'Low'
+    }
+};
+function formatMetric(context) {
+    if (typeof context.score !== 'number' || !Number.isFinite(context.score)) {
+        return '';
+    }
+    const classification = context.task === 'classification';
+    const isPercent = classification && /accuracy|precision|recall|f1|auc/i.test(context.metric);
+    const value = isPercent
+        ? `${(context.score * 100).toFixed(2)}%`
+        : context.score.toFixed(4);
+    let variation = '';
+    if (typeof context.scoreStd === 'number' &&
+        Number.isFinite(context.scoreStd)) {
+        variation = isPercent
+            ? `; fold-to-fold SD ${(context.scoreStd * 100).toFixed(2)} percentage points`
+            : `; fold-to-fold SD ${context.scoreStd.toFixed(4)}`;
+    }
+    return `${context.metric} ${value}${variation}`;
+}
+function buildMeasuredModelExplanation(context) {
+    var _a, _b, _c, _d, _e, _f;
+    const normalizedName = context.name.trim().toLowerCase();
+    const profile = MODEL_PROFILES[normalizedName];
+    const algorithmReason = profile
+        ? profile[context.task]
+        : 'Provides a distinct model family to compare against the other evaluated candidates.';
+    const rankEvidence = `It ranked #${context.rank} of ${context.finalistCount} successfully evaluated ` +
+        'finalists';
+    const metric = formatMetric(context);
+    const measurement = metric
+        ? `, with a mean ${metric}${context.cvFolds ? ` across ${context.cvFolds}-fold CV` : ''}`
+        : context.cvFolds
+            ? ` using ${context.cvFolds}-fold CV`
+            : '';
+    const direction = context.task === 'classification'
+        ? ' (higher balanced accuracy is better)'
+        : ' (lower RMSE is better)';
+    const screening = typeof context.candidateCount === 'number' &&
+        context.candidateCount > context.finalistCount
+        ? ` selected from ${context.candidateCount} screened candidates`
+        : '';
+    return {
+        why: `${algorithmReason} ${rankEvidence}${screening}${measurement}${direction}. ` +
+            'This is evidence from the selected dataset, not a promise of better results on unseen data.',
+        strengths: (_a = profile === null || profile === void 0 ? void 0 : profile.strengths) !== null && _a !== void 0 ? _a : [
+            'Evaluated with the selected dataset and metric',
+            'Preprocessing was fitted within CV folds'
+        ],
+        weaknesses: (_b = profile === null || profile === void 0 ? void 0 : profile.weaknesses) !== null && _b !== void 0 ? _b : [
+            'Performance may change on new data',
+            'The final holdout score can differ from cross-validation'
+        ],
+        bestFor: (_c = profile === null || profile === void 0 ? void 0 : profile.bestFor) !== null && _c !== void 0 ? _c : 'Compare this model when its inductive bias fits the data and evaluation goal.',
+        trainingSpeed: (_d = profile === null || profile === void 0 ? void 0 : profile.trainingSpeed) !== null && _d !== void 0 ? _d : 'Dataset dependent',
+        complexity: (_e = profile === null || profile === void 0 ? void 0 : profile.complexity) !== null && _e !== void 0 ? _e : 'Model dependent',
+        interpretability: (_f = profile === null || profile === void 0 ? void 0 : profile.interpretability) !== null && _f !== void 0 ? _f : 'Model dependent'
+    };
+}
+
+
+},
 "./lib/model-code-utils.js"(__unused_rspack_module, __webpack_exports__, __webpack_require__) {
 __webpack_require__.r(__webpack_exports__);
 __webpack_require__.d(__webpack_exports__, {
@@ -3226,6 +5720,7 @@ function resetTunedModelCode(models) {
         delete model.tuned_params;
         delete model.tuned_changes;
         delete model.tuned_score;
+        delete model.tuned_recommendation_status;
         delete model.tuned_code_error;
         (_a = model.refreshCode) === null || _a === void 0 ? void 0 : _a.call(model);
     });
@@ -3283,6 +5778,10 @@ function applyTunedModelCode(models, results) {
                 : undefined;
             const scoreVal = (_b = (_a = item.best_score) !== null && _a !== void 0 ? _a : item.mean_score) !== null && _b !== void 0 ? _b : item.score;
             model.tuned_score = typeof scoreVal === 'number' ? scoreVal : undefined;
+            model.tuned_recommendation_status =
+                typeof item.recommendation_status === 'string'
+                    ? item.recommendation_status
+                    : undefined;
             delete model.tuned_code_error;
             (_c = model.refreshCode) === null || _c === void 0 ? void 0 : _c.call(model);
             updated += 1;
@@ -3307,9 +5806,12 @@ __webpack_require__.d(__webpack_exports__, {
 /* import */ var _lumino_widgets__rspack_import_0_default = /*#__PURE__*/__webpack_require__.n(_lumino_widgets__rspack_import_0);
 /* import */ var _jupyterlab_cells__rspack_import_1 = __webpack_require__("webpack/sharing/consume/default/@jupyterlab/cells");
 /* import */ var _jupyterlab_cells__rspack_import_1_default = /*#__PURE__*/__webpack_require__.n(_jupyterlab_cells__rspack_import_1);
-/* import */ var _request__rspack_import_2 = __webpack_require__("./lib/request.js");
-/* import */ var _model_code_utils__rspack_import_4 = __webpack_require__("./lib/model-code-utils.js");
-/* import */ var _preprocessing_code_utils__rspack_import_3 = __webpack_require__("./lib/preprocessing-code-utils.js");
+/* import */ var _request__rspack_import_3 = __webpack_require__("./lib/request.js");
+/* import */ var _notebook_mode__rspack_import_2 = __webpack_require__("./lib/notebook-mode.js");
+/* import */ var _model_code_utils__rspack_import_7 = __webpack_require__("./lib/model-code-utils.js");
+/* import */ var _preprocessing_code_utils__rspack_import_4 = __webpack_require__("./lib/preprocessing-code-utils.js");
+/* import */ var _model_advisor_explanations__rspack_import_5 = __webpack_require__("./lib/model-advisor-explanations.js");
+/* import */ var _tuning_explanations__rspack_import_6 = __webpack_require__("./lib/tuning-explanations.js");
 /**
  * ModelMind Studio — Unified Left Sidebar Panel
  *
@@ -3319,9 +5821,11 @@ __webpack_require__.d(__webpack_exports__, {
  *  3. 📊 Feature Analyzer (Distribution Plots, Cardinality, Stats)
  *  4. 🧠 Smart Preprocessing Adviser 2.0 (Recommendations, Live Preview, Apply & Undo, Code Gen)
  *  5. ⚗️ Model Visualization Lab (Interactive Gradient Descent, Decision Tree, KNN, K-Means, PCA)
- *  6. ⚠️ ML Inspector (Static AST Data Leakage & Methodology Checker)
- *  7. 📖 Preprocessing & ML Guide (Educational Best Practices)
+ *  6. 📖 Preprocessing & ML Guide (Educational Best Practices)
  */
+
+
+
 
 
 
@@ -3329,17 +5833,21 @@ __webpack_require__.d(__webpack_exports__, {
 
 class ModelMindStudioWidget extends _lumino_widgets__rspack_import_0.Widget {
     constructor(app, notebooks) {
+        var _a;
         super();
         this._activeTab = 'xray';
         this._currentPath = '50_Startups.csv';
         this._resolvedDatasetPath = '';
         this._dataset = null;
         this._prepLevel = 'basic';
+        this._trainerMode = false;
+        this._preprocessingRequestId = 0;
         this._targetCol = '';
         this._featureCol = '';
         this._tabButtons = new Map();
         this._app = app;
         this._notebooks = notebooks;
+        this._trainerMode = (0,_notebook_mode__rspack_import_2.getModelMindNotebookRole)((_a = notebooks.currentWidget) === null || _a === void 0 ? void 0 : _a.context.model) === 'trainer';
         this.id = 'modelmind-studio-sidebar';
         this.title.caption = 'ModelMind Studio';
         this.title.iconClass = 'mm-sidebar-icon mm-icon-modelmind';
@@ -3351,6 +5859,7 @@ class ModelMindStudioWidget extends _lumino_widgets__rspack_import_0.Widget {
         this._buildTabs();
         this._buildContentArea();
         this._bindNotebookTracker();
+        void this._refreshNotebookModeWhenReady();
         // Auto-load initial dataset if present
         setTimeout(() => {
             void this._loadDataset(this._currentPath);
@@ -3360,6 +5869,7 @@ class ModelMindStudioWidget extends _lumino_widgets__rspack_import_0.Widget {
     // HEADER & DATASET SELECTOR
     // ═════════════════════════════════════════════════════════════════
     _buildHeader() {
+        var _a;
         const hdr = document.createElement('div');
         hdr.className = 'mm-studio-header';
         const brand = document.createElement('div');
@@ -3371,6 +5881,12 @@ class ModelMindStudioWidget extends _lumino_widgets__rspack_import_0.Widget {
         <div class="mm-studio-sub">AI ML Intelligence & Laboratory</div>
       </div>
     `;
+        this._notebookModeLabel = document.createElement('div');
+        this._notebookModeLabel.className = 'mm-studio-sub';
+        this._notebookModeLabel.textContent = this._trainerMode
+            ? 'Trainer Notebook · Preview only'
+            : 'ModelMind Notebook';
+        (_a = brand.querySelector('.mm-studio-title-box')) === null || _a === void 0 ? void 0 : _a.appendChild(this._notebookModeLabel);
         // Dataset Path Row
         const pathWrap = document.createElement('div');
         pathWrap.className = 'mm-studio-path-wrap';
@@ -3438,7 +5954,6 @@ class ModelMindStudioWidget extends _lumino_widgets__rspack_import_0.Widget {
             { id: 'prep', label: '🧠 Preprocessing' },
             { id: 'model-advisor', label: '🤖 Model Advisor' },
             { id: 'lab', label: '⚗️ Model Lab' },
-            { id: 'inspector', label: '⚠️ ML Inspector' },
             { id: 'guide', label: '📖 Guide' },
         ];
         tabsConfig.forEach(t => {
@@ -3464,6 +5979,9 @@ class ModelMindStudioWidget extends _lumino_widgets__rspack_import_0.Widget {
         this._root.appendChild(this._contentArea);
     }
     _bindNotebookTracker() {
+        this._notebooks.currentChanged.connect(() => {
+            void this._refreshNotebookModeWhenReady();
+        });
         this._notebooks.activeCellChanged.connect(() => {
             const cell = this._notebooks.activeCell;
             if (!cell || !(0,_jupyterlab_cells__rspack_import_1.isCodeCellModel)(cell.model))
@@ -3478,6 +5996,33 @@ class ModelMindStudioWidget extends _lumino_widgets__rspack_import_0.Widget {
                 }
             }
         });
+    }
+    async _refreshNotebookModeWhenReady() {
+        const notebook = this._notebooks.currentWidget;
+        if (notebook) {
+            await notebook.context.ready;
+            if (notebook !== this._notebooks.currentWidget) {
+                return;
+            }
+        }
+        this.refreshNotebookMode();
+    }
+    refreshNotebookMode() {
+        var _a, _b;
+        const trainerMode = (0,_notebook_mode__rspack_import_2.getModelMindNotebookRole)((_a = this._notebooks.currentWidget) === null || _a === void 0 ? void 0 : _a.context.model) ===
+            'trainer';
+        if (trainerMode === this._trainerMode) {
+            return;
+        }
+        this._trainerMode = trainerMode;
+        this._notebookModeLabel.textContent = trainerMode
+            ? 'Trainer Notebook · Preview only'
+            : 'ModelMind Notebook';
+        (_b = document.getElementById('mm-code-preview-modal')) === null || _b === void 0 ? void 0 : _b.remove();
+        this._renderCurrentTab();
+    }
+    _canUseCodeAction(action) {
+        return (0,_notebook_mode__rspack_import_2.canUseNotebookCodeAction)(this._trainerMode ? 'trainer' : 'modelmind', action);
     }
     _autoDetectDataset() {
         const cell = this._notebooks.activeCell;
@@ -3506,7 +6051,7 @@ class ModelMindStudioWidget extends _lumino_widgets__rspack_import_0.Widget {
         this._statusPill.textContent = '⏳ Analyzing dataset...';
         this._statusPill.className = 'mm-studio-status-pill loading';
         try {
-            const res = await (0,_request__rspack_import_2.requestAPI)('api/dataset/xray', this._app.serviceManager.serverSettings, {
+            const res = await (0,_request__rspack_import_3.requestAPI)('api/dataset/xray', this._app.serviceManager.serverSettings, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ file_path: path })
@@ -3572,9 +6117,6 @@ class ModelMindStudioWidget extends _lumino_widgets__rspack_import_0.Widget {
                 break;
             case 'lab':
                 this._renderModelLabTab();
-                break;
-            case 'inspector':
-                this._renderInspectorTab();
                 break;
             case 'guide':
                 this._renderGuideTab();
@@ -3747,7 +6289,7 @@ class ModelMindStudioWidget extends _lumino_widgets__rspack_import_0.Widget {
             this._targetCol = col;
             targetResultDiv.innerHTML = '<div class="mm-studio-loading">Analyzing target health...</div>';
             try {
-                const res = await (0,_request__rspack_import_2.requestAPI)('api/dataset/target', this._app.serviceManager.serverSettings, {
+                const res = await (0,_request__rspack_import_3.requestAPI)('api/dataset/target', this._app.serviceManager.serverSettings, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ file_path: this._currentPath, target_column: col })
@@ -3917,7 +6459,7 @@ class ModelMindStudioWidget extends _lumino_widgets__rspack_import_0.Widget {
             this._featureCol = col;
             featResultDiv.innerHTML = '<div class="mm-studio-loading">Analyzing feature distribution...</div>';
             try {
-                const res = await (0,_request__rspack_import_2.requestAPI)('api/dataset/feature', this._app.serviceManager.serverSettings, {
+                const res = await (0,_request__rspack_import_3.requestAPI)('api/dataset/feature', this._app.serviceManager.serverSettings, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ file_path: this._currentPath, feature_column: col })
@@ -4084,23 +6626,19 @@ class ModelMindStudioWidget extends _lumino_widgets__rspack_import_0.Widget {
         topBar.className = 'mm-studio-section';
         // Level description banner
         const levelDescriptions = {
-            basic: '🟢 Basic — Fill missing values with mean/mode. Perfect for beginners.',
-            medium: '🟡 Medium — Fill NA + detect & cap outliers + encoding with pandas.',
-            advanced: '🔴 Advanced — Full sklearn Pipeline with ColumnTransformer, StandardScaler, OneHotEncoder & OrdinalEncoder.',
+            basic: '🟢 Basic — Learn how simple mean, median, or mode filling works, and why the observed values support it.',
+            medium: '🟡 Medium — Impute and inspect distribution / IQR flags; cap only after checking that flagged values are errors.',
+            advanced: '🔴 Advanced — Use leakage-safe sklearn Pipelines and ColumnTransformers fitted on training rows only.',
         };
         const lvlRow = document.createElement('div');
         lvlRow.className = 'mm-studio-level-row';
         lvlRow.id = 'mm-prep-level-row';
         const lbl = document.createElement('span');
-        lbl.style.cssText = 'font-size:11px; opacity:.7; margin-right:6px; font-weight:600;';
+        lbl.style.cssText = 'font-size:12px; opacity:.8; margin-right:8px; font-weight:700;';
         lbl.textContent = 'Skill Level:';
         lvlRow.appendChild(lbl);
         const levelDescBanner = document.createElement('div');
-        levelDescBanner.style.cssText = `
-      font-size:11px; padding:8px 12px; border-radius:8px; margin-bottom:10px; margin-top:6px;
-      background:rgba(167,139,250,0.08); border:1px solid rgba(167,139,250,0.2); color:#c4b5fd;
-      line-height:1.5;
-    `;
+        levelDescBanner.className = `mm-prep-level-banner mm-prep-level-${this._prepLevel}`;
         levelDescBanner.textContent = levelDescriptions[this._prepLevel];
         const updateLevelUI = () => {
             // Update pill active states
@@ -4109,6 +6647,7 @@ class ModelMindStudioWidget extends _lumino_widgets__rspack_import_0.Widget {
                 const isActive = btn.dataset['level'] === this._prepLevel;
                 btn.className = `mm-level-pill${isActive ? ' active' : ''}`;
             });
+            levelDescBanner.className = `mm-prep-level-banner mm-prep-level-${this._prepLevel}`;
             levelDescBanner.textContent = levelDescriptions[this._prepLevel];
         };
         ['basic', 'medium', 'advanced'].forEach(lvl => {
@@ -4135,14 +6674,19 @@ class ModelMindStudioWidget extends _lumino_widgets__rspack_import_0.Widget {
         void this._loadPreprocessingAdvice(prepCardsContainer);
     }
     async _loadPreprocessingAdvice(container) {
+        const requestId = ++this._preprocessingRequestId;
+        const level = this._prepLevel;
+        const datasetPath = this._pathInput.value.trim() || this._currentPath;
         container.innerHTML = '<div class="mm-studio-loading">Generating smart preprocessing recommendations...</div>';
         try {
-            const datasetPath = this._pathInput.value.trim() || this._currentPath;
-            const res = await (0,_request__rspack_import_2.requestAPI)('api/dataset/preprocessing', this._app.serviceManager.serverSettings, {
+            const res = await (0,_request__rspack_import_3.requestAPI)('api/dataset/preprocessing', this._app.serviceManager.serverSettings, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ file_path: datasetPath, level: this._prepLevel })
+                body: JSON.stringify({ file_path: datasetPath, level })
             });
+            if (requestId !== this._preprocessingRequestId || !container.isConnected) {
+                return;
+            }
             this._resolvedDatasetPath = res.resolved_path || datasetPath;
             container.replaceChildren();
             // Warnings banner
@@ -4161,25 +6705,30 @@ class ModelMindStudioWidget extends _lumino_widgets__rspack_import_0.Widget {
                 container.appendChild(card);
             });
             // ── Advanced: Show full pipeline suggestion banner ──
-            if (this._prepLevel === 'advanced' && res.pipeline_code) {
+            if (level === 'advanced' && res.pipeline_code) {
+                const fullPipelineCode = [
+                    (0,_preprocessing_code_utils__rspack_import_4.buildDatasetLoadingCode)(this._resolvedDatasetPath),
+                    '',
+                    res.pipeline_code
+                ].join('\n');
                 const pipelineSection = document.createElement('div');
                 pipelineSection.style.cssText = `
           margin-top:18px; padding:16px; border-radius:12px;
-          background:rgba(99,102,241,0.07); border:1px solid rgba(99,102,241,0.25);
+          background:#f0fdf4; border:1px solid #bbf7d0;
         `;
                 const pipelineTitle = document.createElement('div');
-                pipelineTitle.style.cssText = 'font-size:13px; font-weight:700; margin-bottom:4px; color:#4338ca;';
+                pipelineTitle.style.cssText = 'font-size:14px; font-weight:750; margin-bottom:6px; color:#15803d;';
                 pipelineTitle.innerHTML = '🚀 Suggested Full ColumnTransformer Pipeline';
                 const pipelineSub = document.createElement('div');
-                pipelineSub.style.cssText = 'font-size:11px; color:#5d6b80; margin-bottom:10px;';
+                pipelineSub.style.cssText = 'font-size:13px; line-height:1.55; color:#475569; margin-bottom:12px;';
                 pipelineSub.textContent = 'This pipeline combines all numerical and categorical columns with proper imputation, scaling, and encoding.';
                 const pipelineCode = document.createElement('pre');
                 pipelineCode.style.cssText = `
           background:#ffffff; border:1px solid #dfe3ea; border-radius:8px;
-          padding:12px 14px; font-size:10.5px; overflow-x:auto; margin:0;
+          padding:14px 16px; font-size:12px; overflow-x:auto; margin:0;
           font-family:ui-monospace,SFMono-Regular,monospace; line-height:1.65; color:#1e293b;
         `;
-                pipelineCode.textContent = res.pipeline_code;
+                pipelineCode.textContent = fullPipelineCode;
                 const pipelineBtnRow = document.createElement('div');
                 pipelineBtnRow.style.cssText = 'display:flex; gap:8px; margin-top:10px;';
                 const pipelineCopyBtn = document.createElement('button');
@@ -4187,7 +6736,7 @@ class ModelMindStudioWidget extends _lumino_widgets__rspack_import_0.Widget {
                 pipelineCopyBtn.className = 'mm-studio-btn mm-btn-sm';
                 pipelineCopyBtn.innerHTML = '📋 Copy Pipeline';
                 pipelineCopyBtn.addEventListener('click', async () => {
-                    await navigator.clipboard.writeText(res.pipeline_code);
+                    await navigator.clipboard.writeText(fullPipelineCode);
                     pipelineCopyBtn.textContent = 'Copied!';
                     setTimeout(() => { pipelineCopyBtn.innerHTML = '📋 Copy Pipeline'; }, 1500);
                 });
@@ -4196,19 +6745,35 @@ class ModelMindStudioWidget extends _lumino_widgets__rspack_import_0.Widget {
                 pipelineInsertBtn.className = 'mm-studio-btn mm-btn-sm mm-btn-primary';
                 pipelineInsertBtn.innerHTML = '📥 Insert Pipeline';
                 pipelineInsertBtn.addEventListener('click', () => {
-                    const ok = this._insertPreprocessingCode(res.pipeline_code);
+                    const ok = this._insertPreprocessingCode(fullPipelineCode);
                     this._showToast(ok ? '✓ Pipeline code inserted!' : 'Open a notebook first.');
                 });
-                pipelineBtnRow.append(pipelineCopyBtn, pipelineInsertBtn);
+                if (!this._canUseCodeAction('insert')) {
+                    const pipelinePreviewBtn = document.createElement('button');
+                    pipelinePreviewBtn.type = 'button';
+                    pipelinePreviewBtn.className = 'mm-studio-btn mm-btn-sm';
+                    pipelinePreviewBtn.textContent = '🔍 Preview Code';
+                    pipelinePreviewBtn.addEventListener('click', () => {
+                        this._showCodePreviewModal('Full preprocessing pipeline', fullPipelineCode, 'advanced');
+                    });
+                    pipelineBtnRow.append(pipelinePreviewBtn);
+                }
+                else {
+                    pipelineBtnRow.append(pipelineCopyBtn, pipelineInsertBtn);
+                }
                 pipelineSection.append(pipelineTitle, pipelineSub, pipelineCode, pipelineBtnRow);
                 container.appendChild(pipelineSection);
             }
         }
         catch (err) {
+            if (requestId !== this._preprocessingRequestId || !container.isConnected) {
+                return;
+            }
             container.innerHTML = `<div class="mm-studio-alert mm-alert-error">${err instanceof Error ? err.message : 'Failed to generate recommendations.'}</div>`;
         }
     }
     _createRecommendationCard(rec, recommendations) {
+        var _a;
         const card = document.createElement('div');
         card.className = 'mm-studio-card mm-prep-card';
         const sevColor = {
@@ -4234,10 +6799,71 @@ class ModelMindStudioWidget extends _lumino_widgets__rspack_import_0.Widget {
         const act = document.createElement('div');
         act.className = 'mm-prep-action';
         act.innerHTML = `<b>Recommended:</b> ${rec.recommended_action || rec.imputation_strategy}`;
+        if (rec.feature_type === 'numerical') {
+            const profile = document.createElement('div');
+            profile.className = 'mm-prep-profile';
+            const kind = rec.numeric_kind === 'discrete'
+                ? 'Discrete / count-like'
+                : rec.numeric_kind === 'continuous'
+                    ? 'Continuous-like'
+                    : 'Numeric type unknown';
+            const shape = (rec.distribution_shape || 'unknown')
+                .replace(/_/g, ' ');
+            const skew = typeof rec.skewness === 'number'
+                ? rec.skewness.toFixed(2)
+                : 'unavailable';
+            const outlierPct = typeof rec.outlier_percentage === 'number'
+                ? rec.outlier_percentage
+                : rec.outlier_pct;
+            profile.textContent =
+                `📊 Profile: ${kind} · ${shape} · skewness ${skew} · ` +
+                    `IQR outliers ${(_a = rec.outlier_count) !== null && _a !== void 0 ? _a : 0} (${outlierPct !== null && outlierPct !== void 0 ? outlierPct : 0}%)`;
+            if (rec.transformation_strategy &&
+                rec.transformation_strategy !== 'none') {
+                const transformNote = document.createElement('div');
+                transformNote.style.marginTop = '4px';
+                const transformName = rec.transformation_strategy === 'log1p_candidate'
+                    ? 'Log1p candidate'
+                    : rec.transformation_strategy === 'power_transform_candidate'
+                        ? 'Yeo-Johnson candidate'
+                        : rec.transformation_strategy.replace(/_/g, ' ');
+                transformNote.textContent =
+                    `Distribution option: ${transformName}. ` +
+                        (rec.transformation_reason || 'Validate the transformed shape before using it.');
+                profile.appendChild(transformNote);
+            }
+            card.appendChild(profile);
+        }
         // Why & Risks
         const whyEl = document.createElement('div');
-        whyEl.className = 'mm-prep-text';
-        whyEl.innerHTML = `<b>Why:</b> ${rec.why || rec.explanation}`;
+        whyEl.className = 'mm-prep-why';
+        const whyLabel = document.createElement('b');
+        whyLabel.textContent = '✅ Why this choice: ';
+        whyEl.append(whyLabel, rec.why || rec.explanation);
+        if (rec.feature_type === 'numerical' && rec.imputation_reason) {
+            const reason = document.createElement('div');
+            reason.style.marginTop = '4px';
+            reason.textContent = `Imputation rationale: ${rec.imputation_reason}`;
+            whyEl.appendChild(reason);
+        }
+        const cautions = [
+            ...(Array.isArray(rec.warnings) ? rec.warnings : []),
+            ...(rec.risks ? [rec.risks] : [])
+        ].filter((item, index, all) => item && !/^no risks?\b/i.test(item.trim()) && all.indexOf(item) === index);
+        const riskEl = cautions.length > 0 ? document.createElement('div') : null;
+        if (riskEl) {
+            riskEl.className = 'mm-prep-risk-box';
+            const riskHeading = document.createElement('strong');
+            riskHeading.textContent = '⚠️ Considerations';
+            const riskList = document.createElement('ul');
+            riskList.style.cssText = 'margin:6px 0 0;padding-left:20px;';
+            cautions.forEach(caution => {
+                const item = document.createElement('li');
+                item.textContent = caution;
+                riskList.appendChild(item);
+            });
+            riskEl.append(riskHeading, riskList);
+        }
         // Strategy selector
         const stratWrap = document.createElement('div');
         stratWrap.className = 'mm-prep-strategy-row';
@@ -4246,14 +6872,24 @@ class ModelMindStudioWidget extends _lumino_widgets__rspack_import_0.Widget {
         const strategies = rec.feature_type === 'numerical'
             ? ['mean', 'median', 'most_frequent', 'constant', 'standard_scaler', 'minmax_scaler', 'robust_scaler', 'cap_outliers_iqr', 'drop_column']
             : ['most_frequent', 'unknown', 'one_hot_encode', 'ordinal_encode', 'frequency_encode', 'drop_column'];
+        const defaultStrategy = strategies.includes(rec.imputation_strategy)
+            ? rec.imputation_strategy
+            : rec.feature_type === 'numerical'
+                ? 'median'
+                : strategies[0];
         strategies.forEach(s => {
             const opt = document.createElement('option');
             opt.value = s;
             opt.textContent = s.replace(/_/g, ' ').toUpperCase();
-            if (s === rec.imputation_strategy || s === 'median')
+            if (s === defaultStrategy)
                 opt.selected = true;
             stratSelect.appendChild(opt);
         });
+        let strategyCustomized = false;
+        stratSelect.addEventListener('change', () => {
+            strategyCustomized = true;
+        });
+        const getCode = () => this._buildFullPreprocessingCode(rec, stratSelect.value, strategyCustomized ? undefined : rec.example_code);
         stratWrap.innerHTML = '<span style="font-size:10px; opacity:.7;">Strategy:</span>';
         stratWrap.appendChild(stratSelect);
         // Live preview container
@@ -4273,7 +6909,7 @@ class ModelMindStudioWidget extends _lumino_widgets__rspack_import_0.Widget {
             prevBtn.disabled = true;
             prevBtn.textContent = '⏳ Loading...';
             try {
-                const preview = await (0,_request__rspack_import_2.requestAPI)('api/dataset/preprocessing/preview', this._app.serviceManager.serverSettings, {
+                const preview = await (0,_request__rspack_import_3.requestAPI)('api/dataset/preprocessing/preview', this._app.serviceManager.serverSettings, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
@@ -4282,7 +6918,7 @@ class ModelMindStudioWidget extends _lumino_widgets__rspack_import_0.Widget {
                         strategy: stratSelect.value
                     })
                 });
-                this._renderLivePreview(previewContainer, preview);
+                this._renderLivePreview(previewContainer, preview, rec, this._prepLevel);
                 previewContainer.style.display = 'block';
             }
             catch (err) {
@@ -4306,7 +6942,7 @@ class ModelMindStudioWidget extends _lumino_widgets__rspack_import_0.Widget {
             applyBtn.disabled = true;
             applyBtn.textContent = 'Applying...';
             try {
-                const applied = await (0,_request__rspack_import_2.requestAPI)('api/dataset/preprocessing/apply', this._app.serviceManager.serverSettings, {
+                const applied = await (0,_request__rspack_import_3.requestAPI)('api/dataset/preprocessing/apply', this._app.serviceManager.serverSettings, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
@@ -4338,7 +6974,7 @@ class ModelMindStudioWidget extends _lumino_widgets__rspack_import_0.Widget {
             if (!confirm(`Undo changes and restore ${this._currentPath} from backup?`))
                 return;
             try {
-                const undone = await (0,_request__rspack_import_2.requestAPI)('api/dataset/preprocessing/undo', this._app.serviceManager.serverSettings, {
+                const undone = await (0,_request__rspack_import_3.requestAPI)('api/dataset/preprocessing/undo', this._app.serviceManager.serverSettings, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ file_path: this._currentPath })
@@ -4359,7 +6995,7 @@ class ModelMindStudioWidget extends _lumino_widgets__rspack_import_0.Widget {
         insertBtn.innerHTML = '📥 Insert Code';
         insertBtn.title = 'Insert complete runnable preprocessing code, including loading the selected dataset';
         insertBtn.addEventListener('click', () => {
-            const code = this._buildFullPreprocessingCode(rec, stratSelect.value);
+            const code = getCode();
             const ok = this._insertPreprocessingCode(code);
             if (ok) {
                 this._showToast('✓ Full preprocessing code inserted below active cell!');
@@ -4375,7 +7011,7 @@ class ModelMindStudioWidget extends _lumino_widgets__rspack_import_0.Widget {
         copyBtn.innerHTML = '📋 Copy';
         copyBtn.addEventListener('click', async () => {
             try {
-                await navigator.clipboard.writeText(this._buildFullPreprocessingCode(rec, stratSelect.value));
+                await navigator.clipboard.writeText(getCode());
                 copyBtn.textContent = 'Copied!';
                 setTimeout(() => { copyBtn.innerHTML = '📋 Copy'; }, 1500);
             }
@@ -4390,15 +7026,26 @@ class ModelMindStudioWidget extends _lumino_widgets__rspack_import_0.Widget {
         previewCodeBtn.innerHTML = '🔍 Preview Code';
         previewCodeBtn.title = 'View the generated code in a readable panel';
         previewCodeBtn.addEventListener('click', () => {
-            this._showCodePreviewModal(rec.feature, this._buildFullPreprocessingCode(rec, stratSelect.value), this._prepLevel);
+            this._showCodePreviewModal(rec.feature, getCode(), this._prepLevel);
         });
-        toolRow.append(prevBtn, applyBtn, undoBtn, insertBtn, copyBtn, previewCodeBtn);
-        card.append(hdr, act, whyEl, stratWrap, previewContainer, toolRow);
+        toolRow.append(prevBtn, applyBtn, undoBtn);
+        if (this._canUseCodeAction('insert')) {
+            toolRow.append(insertBtn, copyBtn);
+        }
+        toolRow.append(previewCodeBtn);
+        card.append(hdr, act);
+        const profileEl = card.querySelector('.mm-prep-profile');
+        if (profileEl)
+            card.appendChild(profileEl);
+        card.appendChild(whyEl);
+        if (riskEl)
+            card.appendChild(riskEl);
+        card.append(stratWrap, previewContainer, toolRow);
         return card;
     }
-    _buildFullPreprocessingCode(rec, selectedStrategy) {
+    _buildFullPreprocessingCode(rec, selectedStrategy, recommendedCode) {
         const selectedPath = this._resolvedDatasetPath || this._pathInput.value.trim() || this._currentPath;
-        return (0,_preprocessing_code_utils__rspack_import_3.buildFullPreprocessingCode)(selectedPath, rec, selectedStrategy);
+        return (0,_preprocessing_code_utils__rspack_import_4.buildFullPreprocessingCode)(selectedPath, rec, selectedStrategy, recommendedCode);
     }
     // ── Code Preview Modal ────────────────────────────────────────────────────
     _showCodePreviewModal(feature, code, level) {
@@ -4505,7 +7152,10 @@ class ModelMindStudioWidget extends _lumino_widgets__rspack_import_0.Widget {
         ftrClose.className = 'mm-studio-btn mm-btn-sm';
         ftrClose.innerHTML = 'Close';
         ftrClose.addEventListener('click', () => overlay.remove());
-        modalFtr.append(ftrCopy, ftrInsert, ftrClose);
+        if (this._canUseCodeAction('copy')) {
+            modalFtr.append(ftrCopy, ftrInsert);
+        }
+        modalFtr.append(ftrClose);
         modal.append(modalHdr, codeBody, modalFtr);
         overlay.appendChild(modal);
         // Close on backdrop click
@@ -4515,16 +7165,18 @@ class ModelMindStudioWidget extends _lumino_widgets__rspack_import_0.Widget {
         });
         document.body.appendChild(overlay);
     }
-    _renderLivePreview(container, preview) {
-        var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k;
+    _renderLivePreview(container, preview, recommendation, level) {
+        var _a, _b, _c, _d, _e, _f, _g;
         container.replaceChildren();
         const title = document.createElement('div');
-        title.style.cssText = 'font-weight:700; font-size:11px; margin-bottom:8px; color:#818cf8;';
-        title.innerHTML = `👁️ Live Preview: Strategy <code>${preview.strategy}</code> on <code>${preview.feature}</code>`;
-        const beforeMiss = (_c = (_b = (_a = preview.before.statistics) === null || _a === void 0 ? void 0 : _a.missing_count) !== null && _b !== void 0 ? _b : preview.before.missing_count) !== null && _c !== void 0 ? _c : 0;
-        const afterMiss = (_f = (_e = (_d = preview.after.statistics) === null || _d === void 0 ? void 0 : _d.missing_count) !== null && _e !== void 0 ? _e : preview.after.missing_count) !== null && _f !== void 0 ? _f : 0;
-        const beforeMean = (_h = (_g = preview.before.statistics) === null || _g === void 0 ? void 0 : _g.mean) !== null && _h !== void 0 ? _h : preview.before.mean;
-        const afterMean = (_k = (_j = preview.after.statistics) === null || _j === void 0 ? void 0 : _j.mean) !== null && _k !== void 0 ? _k : preview.after.mean;
+        title.style.cssText = 'font-weight:750; font-size:14px; margin-bottom:12px; color:#166534;';
+        title.textContent = `👁️ Live Preview: ${preview.strategy.replace(/_/g, ' ')} on ${preview.feature}`;
+        const beforeStats = preview.before.statistics;
+        const afterStats = preview.after.statistics;
+        const beforeMiss = (_b = (_a = beforeStats === null || beforeStats === void 0 ? void 0 : beforeStats.missing_count) !== null && _a !== void 0 ? _a : preview.before.missing_count) !== null && _b !== void 0 ? _b : 0;
+        const afterMiss = (_d = (_c = afterStats === null || afterStats === void 0 ? void 0 : afterStats.missing_count) !== null && _c !== void 0 ? _c : preview.after.missing_count) !== null && _d !== void 0 ? _d : 0;
+        const beforeMean = (_e = beforeStats === null || beforeStats === void 0 ? void 0 : beforeStats.mean) !== null && _e !== void 0 ? _e : preview.before.mean;
+        const afterMean = (_f = afterStats === null || afterStats === void 0 ? void 0 : afterStats.mean) !== null && _f !== void 0 ? _f : preview.after.mean;
         const beforeSample = preview.before.sample || preview.before.sample_values || [];
         const afterSample = preview.after.sample || preview.after.sample_values || [];
         const grid = document.createElement('div');
@@ -4550,24 +7202,259 @@ class ModelMindStudioWidget extends _lumino_widgets__rspack_import_0.Widget {
           <div class="mm-stat-lbl">Mean After</div>
         </div>
       ` : ''}
+      ${(beforeStats === null || beforeStats === void 0 ? void 0 : beforeStats.skewness) !== undefined ? `
+        <div class="mm-stat-box">
+          <div class="mm-stat-val">${beforeStats.skewness === null ? '—' : beforeStats.skewness.toFixed(2)}</div>
+          <div class="mm-stat-lbl">Skewness Before</div>
+        </div>
+      ` : ''}
+      ${(afterStats === null || afterStats === void 0 ? void 0 : afterStats.skewness) !== undefined ? `
+        <div class="mm-stat-box">
+          <div class="mm-stat-val">${afterStats.skewness === null ? '—' : afterStats.skewness.toFixed(2)}</div>
+          <div class="mm-stat-lbl">Skewness After</div>
+        </div>
+      ` : ''}
     `;
+        if ((beforeStats === null || beforeStats === void 0 ? void 0 : beforeStats.category_distribution) && (afterStats === null || afterStats === void 0 ? void 0 : afterStats.category_distribution)) {
+            const beforeDistribution = beforeStats.category_distribution;
+            const afterDistribution = afterStats.category_distribution;
+            const categories = beforeDistribution.categories;
+            const chartTitle = document.createElement('div');
+            chartTitle.style.cssText = 'font-size:13px;font-weight:750;margin:14px 0 7px;color:#173b2b;';
+            chartTitle.textContent = 'Categorical histogram — frequency before vs after';
+            const rowHeight = 32;
+            const chartHeight = Math.max(130, 38 + categories.length * rowHeight);
+            const chart = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+            chart.setAttribute('viewBox', `0 0 360 ${chartHeight}`);
+            chart.setAttribute('role', 'img');
+            chart.setAttribute('aria-label', `Categorical histogram for ${preview.feature} before and after ${preview.strategy} imputation`);
+            chart.style.cssText = 'width:100%;height:auto;max-height:260px;background:#fff;border:1px solid #e2e8f0;border-radius:8px;';
+            const addSvg = (name, attrs, text) => {
+                const element = document.createElementNS('http://www.w3.org/2000/svg', name);
+                Object.entries(attrs).forEach(([key, value]) => element.setAttribute(key, value));
+                if (text)
+                    element.textContent = text;
+                chart.appendChild(element);
+                return element;
+            };
+            addSvg('rect', { x: '126', y: '9', width: '9', height: '9', rx: '2', fill: '#6366f1' });
+            addSvg('text', { x: '140', y: '17', fill: '#475569', 'font-size': '10' }, `Before (n=${beforeDistribution.sample_count})`);
+            addSvg('rect', { x: '244', y: '9', width: '9', height: '9', rx: '2', fill: '#10b981' });
+            addSvg('text', { x: '258', y: '17', fill: '#475569', 'font-size': '10' }, `After (n=${afterDistribution.sample_count})`);
+            const maxPercentage = Math.max(1, ...beforeDistribution.percentages, ...afterDistribution.percentages);
+            const barStart = 128;
+            const barMaxWidth = 164;
+            const label = (value) => value.length > 17 ? `${value.slice(0, 16)}…` : value;
+            categories.forEach((category, index) => {
+                const y = 27 + index * rowHeight;
+                addSvg('text', { x: '8', y: String(y + 15), fill: '#334155', 'font-size': '10' }, label(category));
+                addSvg('rect', { x: String(barStart), y: String(y + 1), width: String(barMaxWidth), height: '8', rx: '3', fill: '#eef2ff' });
+                addSvg('rect', { x: String(barStart), y: String(y + 12), width: String(barMaxWidth), height: '8', rx: '3', fill: '#ecfdf5' });
+                const beforeWidth = beforeDistribution.percentages[index] / maxPercentage * barMaxWidth;
+                const afterWidth = afterDistribution.percentages[index] / maxPercentage * barMaxWidth;
+                const beforeBar = addSvg('rect', { x: String(barStart), y: String(y + 1), width: beforeWidth.toFixed(2), height: '8', rx: '3', fill: '#6366f1' });
+                beforeBar.appendChild(document.createElementNS('http://www.w3.org/2000/svg', 'title')).textContent =
+                    `Before · ${beforeDistribution.counts[index]} rows (${beforeDistribution.percentages[index]}%)`;
+                const afterBar = addSvg('rect', { x: String(barStart), y: String(y + 12), width: afterWidth.toFixed(2), height: '8', rx: '3', fill: '#10b981' });
+                afterBar.appendChild(document.createElementNS('http://www.w3.org/2000/svg', 'title')).textContent =
+                    `After · ${afterDistribution.counts[index]} rows (${afterDistribution.percentages[index]}%)`;
+                addSvg('text', { x: String(barStart + barMaxWidth + 5), y: String(y + 8), fill: '#64748b', 'font-size': '9' }, `${beforeDistribution.percentages[index].toFixed(1)}%`);
+                addSvg('text', { x: String(barStart + barMaxWidth + 5), y: String(y + 19), fill: '#64748b', 'font-size': '9' }, `${afterDistribution.percentages[index].toFixed(1)}%`);
+            });
+            const chartNote = document.createElement('div');
+            chartNote.className = 'mm-prep-preview-note';
+            chartNote.textContent = categories.includes('Other (remaining)')
+                ? 'Bars compare category percentages on a shared scale. The eight most common categories are shown; the remaining categories are grouped as Other.'
+                : 'Bars compare category percentages on a shared scale. Percentages use each side’s non-missing row count.';
+            const whyBox = document.createElement('div');
+            whyBox.className = 'mm-prep-preview-rationale';
+            const whyHeading = document.createElement('strong');
+            whyHeading.textContent = `✅ Why this ${level} choice? `;
+            const whyText = document.createElement('span');
+            whyText.textContent = recommendation.why || recommendation.explanation;
+            whyBox.append(whyHeading, whyText);
+            if (recommendation.imputation_reason) {
+                const methodReason = document.createElement('div');
+                methodReason.style.cssText = 'margin-top:7px;';
+                methodReason.textContent = `Method rationale: ${recommendation.imputation_reason}`;
+                whyBox.appendChild(methodReason);
+            }
+            const previewExplanation = document.createElement('div');
+            previewExplanation.className = 'mm-prep-preview-note';
+            previewExplanation.textContent = preview.details || preview.explanation || '';
+            container.append(title, grid, chartTitle, chart, chartNote, whyBox, previewExplanation);
+        }
+        else if ((beforeStats === null || beforeStats === void 0 ? void 0 : beforeStats.pdf) && (afterStats === null || afterStats === void 0 ? void 0 : afterStats.pdf)) {
+            const chartTitle = document.createElement('div');
+            chartTitle.style.cssText = 'font-size:13px;font-weight:750;margin:14px 0 7px;color:#173b2b;';
+            chartTitle.textContent = 'PDF — empirical probability density (shared bins)';
+            const chart = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+            chart.setAttribute('viewBox', '0 0 360 176');
+            chart.setAttribute('role', 'img');
+            chart.setAttribute('aria-label', `Probability density plot for ${preview.feature} before and after ${preview.strategy} imputation`);
+            chart.style.cssText = 'width:100%;height:auto;max-height:190px;background:#fff;border:1px solid #e2e8f0;border-radius:8px;';
+            const edges = beforeStats.pdf.edges;
+            const beforeDensity = beforeStats.pdf.density;
+            const afterDensity = afterStats.pdf.density;
+            const binCount = Math.min(beforeDensity.length, afterDensity.length, Math.max(0, edges.length - 1));
+            const maxDensity = Math.max(0, ...beforeDensity.slice(0, binCount), ...afterDensity.slice(0, binCount));
+            const left = 42, right = 8, top = 24, plotHeight = 112;
+            const plotWidth = 360 - left - right;
+            const addSvg = (name, attrs, text) => {
+                const element = document.createElementNS('http://www.w3.org/2000/svg', name);
+                Object.entries(attrs).forEach(([key, value]) => element.setAttribute(key, value));
+                if (text)
+                    element.textContent = text;
+                chart.appendChild(element);
+                return element;
+            };
+            addSvg('line', { x1: String(left), y1: String(top + plotHeight), x2: String(360 - right), y2: String(top + plotHeight), stroke: '#94a3b8', 'stroke-width': '1' });
+            addSvg('line', { x1: String(left), y1: String(top), x2: String(left), y2: String(top + plotHeight), stroke: '#94a3b8', 'stroke-width': '1' });
+            if (maxDensity > 0 && binCount > 0) {
+                const groupWidth = plotWidth / binCount;
+                const barWidth = Math.max(2, groupWidth * 0.39);
+                for (let index = 0; index < binCount; index += 1) {
+                    const x = left + index * groupWidth + groupWidth * 0.08;
+                    const beforeHeight = beforeDensity[index] / maxDensity * plotHeight;
+                    const afterHeight = afterDensity[index] / maxDensity * plotHeight;
+                    const beforeRect = addSvg('rect', {
+                        x: x.toFixed(2), y: (top + plotHeight - beforeHeight).toFixed(2),
+                        width: barWidth.toFixed(2), height: Math.max(0.5, beforeHeight).toFixed(2),
+                        rx: '1', fill: '#6366f1', opacity: '0.78'
+                    });
+                    beforeRect.appendChild(document.createElementNS('http://www.w3.org/2000/svg', 'title')).textContent =
+                        `Before · ${beforeStats.pdf.counts[index]} rows · density ${beforeDensity[index]}`;
+                    const afterRect = addSvg('rect', {
+                        x: (x + barWidth + groupWidth * 0.06).toFixed(2), y: (top + plotHeight - afterHeight).toFixed(2),
+                        width: barWidth.toFixed(2), height: Math.max(0.5, afterHeight).toFixed(2),
+                        rx: '1', fill: '#10b981', opacity: '0.78'
+                    });
+                    afterRect.appendChild(document.createElementNS('http://www.w3.org/2000/svg', 'title')).textContent =
+                        `After · ${afterStats.pdf.counts[index]} rows · density ${afterDensity[index]}`;
+                }
+            }
+            addSvg('rect', { x: '48', y: '7', width: '9', height: '9', rx: '2', fill: '#6366f1' });
+            addSvg('text', { x: '61', y: '15', fill: '#475569', 'font-size': '9' }, `Before (n=${beforeStats.pdf.sample_count})`);
+            addSvg('rect', { x: '166', y: '7', width: '9', height: '9', rx: '2', fill: '#10b981' });
+            addSvg('text', { x: '179', y: '15', fill: '#475569', 'font-size': '9' }, `After (n=${afterStats.pdf.sample_count})`);
+            addSvg('text', { x: String(left), y: '169', fill: '#64748b', 'font-size': '9' }, String(edges[0]));
+            addSvg('text', { x: String(360 - right), y: '169', fill: '#64748b', 'font-size': '9', 'text-anchor': 'end' }, String(edges[edges.length - 1]));
+            const chartNote = document.createElement('div');
+            chartNote.className = 'mm-prep-preview-note';
+            chartNote.textContent = 'This empirical PDF is a density-normalized histogram: bar area represents probability, and total area is approximately 1.';
+            let kdeTitle = null;
+            let kdeChart = null;
+            let kdeNote = null;
+            if (recommendation.numeric_kind === 'discrete') {
+                kdeNote = document.createElement('div');
+                kdeNote.className = 'mm-prep-preview-note';
+                kdeNote.textContent = 'KDE is omitted because this is a discrete/count-like feature; smoothing it would imply values between valid counts. The PDF above shows its empirical distribution.';
+            }
+            else if (beforeStats.kde && afterStats.kde) {
+                kdeTitle = document.createElement('div');
+                kdeTitle.style.cssText = 'font-size:13px;font-weight:750;margin:14px 0 7px;color:#173b2b;';
+                kdeTitle.textContent = 'KDE — smoothed density estimate (before vs after)';
+                kdeChart = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+                kdeChart.setAttribute('viewBox', '0 0 360 176');
+                kdeChart.setAttribute('role', 'img');
+                kdeChart.setAttribute('aria-label', `Gaussian KDE plot for ${preview.feature} before and after ${preview.strategy} imputation`);
+                kdeChart.style.cssText = 'width:100%;height:auto;max-height:190px;background:#fff;border:1px solid #e2e8f0;border-radius:8px;';
+                const kdeX = beforeStats.kde.x;
+                const beforeKde = beforeStats.kde.density;
+                const afterKde = afterStats.kde.density;
+                const pointCount = Math.min(kdeX.length, beforeKde.length, afterKde.length);
+                const maxKde = Math.max(0, ...beforeKde.slice(0, pointCount), ...afterKde.slice(0, pointCount));
+                const kdeLeft = 42, kdeRight = 8, kdeTop = 24, kdeHeight = 112;
+                const kdeWidth = 360 - kdeLeft - kdeRight;
+                const addKdeSvg = (name, attrs, text) => {
+                    const element = document.createElementNS('http://www.w3.org/2000/svg', name);
+                    Object.entries(attrs).forEach(([key, value]) => element.setAttribute(key, value));
+                    if (text)
+                        element.textContent = text;
+                    kdeChart === null || kdeChart === void 0 ? void 0 : kdeChart.appendChild(element);
+                    return element;
+                };
+                addKdeSvg('line', { x1: String(kdeLeft), y1: String(kdeTop + kdeHeight), x2: String(360 - kdeRight), y2: String(kdeTop + kdeHeight), stroke: '#94a3b8', 'stroke-width': '1' });
+                addKdeSvg('line', { x1: String(kdeLeft), y1: String(kdeTop), x2: String(kdeLeft), y2: String(kdeTop + kdeHeight), stroke: '#94a3b8', 'stroke-width': '1' });
+                if (maxKde > 0 && pointCount > 1) {
+                    const makePath = (density) => density.slice(0, pointCount).map((value, index) => {
+                        const x = kdeLeft + (index / (pointCount - 1)) * kdeWidth;
+                        const y = kdeTop + kdeHeight - (value / maxKde) * kdeHeight;
+                        return `${index === 0 ? 'M' : 'L'}${x.toFixed(2)},${y.toFixed(2)}`;
+                    }).join(' ');
+                    addKdeSvg('path', { d: makePath(beforeKde), fill: 'none', stroke: '#6366f1', 'stroke-width': '2.5', 'stroke-linejoin': 'round', 'stroke-linecap': 'round' });
+                    addKdeSvg('path', { d: makePath(afterKde), fill: 'none', stroke: '#10b981', 'stroke-width': '2.5', 'stroke-linejoin': 'round', 'stroke-linecap': 'round' });
+                }
+                addKdeSvg('line', { x1: '48', y1: '12', x2: '58', y2: '12', stroke: '#6366f1', 'stroke-width': '3' });
+                addKdeSvg('text', { x: '62', y: '15', fill: '#475569', 'font-size': '9' }, `Before (n=${beforeStats.kde.sample_count})`);
+                addKdeSvg('line', { x1: '166', y1: '12', x2: '176', y2: '12', stroke: '#10b981', 'stroke-width': '3' });
+                addKdeSvg('text', { x: '180', y: '15', fill: '#475569', 'font-size': '9' }, `After (n=${afterStats.kde.sample_count})`);
+                addKdeSvg('text', { x: String(kdeLeft), y: '169', fill: '#64748b', 'font-size': '9' }, String(kdeX[0]));
+                addKdeSvg('text', { x: String(360 - kdeRight), y: '169', fill: '#64748b', 'font-size': '9', 'text-anchor': 'end' }, String(kdeX[pointCount - 1]));
+                kdeNote = document.createElement('div');
+                kdeNote.className = 'mm-prep-preview-note';
+                kdeNote.textContent = `Gaussian KDE with shared bandwidth ${(_g = beforeStats.kde.bandwidth) !== null && _g !== void 0 ? _g : '—'}; this is a smoothed estimate, while the PDF above shows binned empirical density.`;
+            }
+            const whyBox = document.createElement('div');
+            whyBox.className = 'mm-prep-preview-rationale';
+            const whyHeading = document.createElement('strong');
+            whyHeading.textContent = `✅ Why this ${level} choice? `;
+            const whyText = document.createElement('span');
+            whyText.textContent = recommendation.why || recommendation.explanation;
+            whyBox.append(whyHeading, whyText);
+            if (recommendation.imputation_reason) {
+                const methodReason = document.createElement('div');
+                methodReason.style.cssText = 'margin-top:7px;';
+                methodReason.textContent = `Method rationale: ${recommendation.imputation_reason}`;
+                whyBox.appendChild(methodReason);
+            }
+            const previewExplanation = document.createElement('div');
+            previewExplanation.className = 'mm-prep-preview-note';
+            previewExplanation.textContent = preview.details || preview.explanation || '';
+            container.append(title, grid, chartTitle, chart, chartNote);
+            if (kdeTitle && kdeChart && kdeNote)
+                container.append(kdeTitle, kdeChart, kdeNote);
+            else if (kdeNote)
+                container.append(kdeNote);
+            container.append(whyBox, previewExplanation);
+        }
         // Sample Values Comparison
         const sampleBox = document.createElement('div');
         sampleBox.className = 'mm-prep-sample-box';
-        sampleBox.innerHTML = `
-      <div style="font-size:10px; font-weight:600; margin-bottom:4px; opacity:.8;">Sample Values (Before vs After):</div>
-      <div style="display:flex; gap:10px; font-family:monospace; font-size:10px;">
-        <div style="flex:1;">
-          <div style="opacity:.6; margin-bottom:2px;">Before:</div>
-          <div style="color:#fca5a5;">${beforeSample.slice(0, 5).map((v) => v === null ? 'NaN' : typeof v === 'number' ? v.toFixed(1) : v).join(', ')}</div>
-        </div>
-        <div style="flex:1;">
-          <div style="opacity:.6; margin-bottom:2px;">After:</div>
-          <div style="color:#86efac;">${afterSample.slice(0, 5).map((v) => v === null ? 'NaN' : typeof v === 'number' ? v.toFixed(1) : v).join(', ')}</div>
-        </div>
-      </div>
-    `;
-        container.append(title, grid, sampleBox);
+        const sampleTitle = document.createElement('div');
+        sampleTitle.style.cssText = 'font-size:10px;font-weight:600;margin-bottom:4px;opacity:.8;';
+        sampleTitle.textContent = 'Sample values (before vs after):';
+        const sampleColumns = document.createElement('div');
+        sampleColumns.style.cssText = 'display:flex;gap:10px;font-family:monospace;font-size:10px;';
+        const beforeColumn = document.createElement('div');
+        beforeColumn.style.flex = '1';
+        const beforeLabel = document.createElement('div');
+        beforeLabel.style.cssText = 'opacity:.6;margin-bottom:2px;';
+        beforeLabel.textContent = 'Before:';
+        const beforeValues = document.createElement('div');
+        beforeValues.style.color = '#dc2626';
+        beforeValues.textContent = beforeSample.slice(0, 5).map((v) => v === null ? 'NaN' : typeof v === 'number' ? v.toFixed(1) : String(v)).join(', ');
+        beforeColumn.append(beforeLabel, beforeValues);
+        const afterColumn = document.createElement('div');
+        afterColumn.style.flex = '1';
+        const afterLabel = document.createElement('div');
+        afterLabel.style.cssText = 'opacity:.6;margin-bottom:2px;';
+        afterLabel.textContent = 'After:';
+        const afterValues = document.createElement('div');
+        afterValues.style.color = '#059669';
+        afterValues.textContent = afterSample.slice(0, 5).map((v) => v === null ? 'NaN' : typeof v === 'number' ? v.toFixed(1) : String(v)).join(', ');
+        afterColumn.append(afterLabel, afterValues);
+        sampleColumns.append(beforeColumn, afterColumn);
+        sampleBox.append(sampleTitle, sampleColumns);
+        if (!((beforeStats === null || beforeStats === void 0 ? void 0 : beforeStats.pdf) && (afterStats === null || afterStats === void 0 ? void 0 : afterStats.pdf))) {
+            const reason = document.createElement('div');
+            reason.className = 'mm-prep-text';
+            reason.textContent = recommendation.why || recommendation.explanation;
+            container.append(title, grid, reason, sampleBox);
+        }
+        else {
+            container.appendChild(sampleBox);
+        }
     }
     // ═════════════════════════════════════════════════════════════════
     // VIEW 4.5: 🤖 MODEL ADVISOR
@@ -4755,7 +7642,7 @@ class ModelMindStudioWidget extends _lumino_widgets__rspack_import_0.Widget {
             }
             evaluationCancel.disabled = true;
             try {
-                await (0,_request__rspack_import_2.requestAPI)(`api/dataset/evaluation-jobs/${activeEvaluationJob}/cancel`, evaluationSettings, { method: 'POST' });
+                await (0,_request__rspack_import_3.requestAPI)(`api/dataset/evaluation-jobs/${activeEvaluationJob}/cancel`, evaluationSettings, { method: 'POST' });
                 evaluationStatus.textContent =
                     'Cancellation requested. Waiting for worker to stop...';
             }
@@ -4799,7 +7686,7 @@ class ModelMindStudioWidget extends _lumino_widgets__rspack_import_0.Widget {
                     return;
                 }
                 try {
-                    await (0,_request__rspack_import_2.requestAPI)(`api/dataset/evaluation-jobs/${submittedJobId}/cancel`, evaluationSettings, { method: 'POST' });
+                    await (0,_request__rspack_import_3.requestAPI)(`api/dataset/evaluation-jobs/${submittedJobId}/cancel`, evaluationSettings, { method: 'POST' });
                 }
                 catch (_a) {
                     // The job may already be finished or no longer
@@ -4807,7 +7694,7 @@ class ModelMindStudioWidget extends _lumino_widgets__rspack_import_0.Widget {
                 }
             };
             try {
-                const submitted = await (0,_request__rspack_import_2.requestAPI)('api/dataset/evaluation-jobs', evaluationSettings, {
+                const submitted = await (0,_request__rspack_import_3.requestAPI)('api/dataset/evaluation-jobs', evaluationSettings, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
@@ -4837,7 +7724,7 @@ class ModelMindStudioWidget extends _lumino_widgets__rspack_import_0.Widget {
                         await cancelObsoleteJob();
                         return;
                     }
-                    const job = await (0,_request__rspack_import_2.requestAPI)(`api/dataset/evaluation-jobs/${submitted.job_id}`, evaluationSettings);
+                    const job = await (0,_request__rspack_import_3.requestAPI)(`api/dataset/evaluation-jobs/${submitted.job_id}`, evaluationSettings);
                     // A dataset, target or navigation change may have
                     // happened while the HTTP request was in flight.
                     if (!isEvaluationCurrent()) {
@@ -4934,7 +7821,7 @@ class ModelMindStudioWidget extends _lumino_widgets__rspack_import_0.Widget {
                 cancelBtn.disabled = true;
                 statusEl.textContent = 'Requesting cancellation...';
                 try {
-                    await (0,_request__rspack_import_2.requestAPI)(`api/dataset/evaluation-jobs/${jobId}/cancel`, this._app.serviceManager.serverSettings, { method: 'POST' });
+                    await (0,_request__rspack_import_3.requestAPI)(`api/dataset/evaluation-jobs/${jobId}/cancel`, this._app.serviceManager.serverSettings, { method: 'POST' });
                 }
                 catch (error) {
                     cancellationRequested = false;
@@ -4945,7 +7832,7 @@ class ModelMindStudioWidget extends _lumino_widgets__rspack_import_0.Widget {
             });
             try {
                 const settings = this._app.serviceManager.serverSettings;
-                const submitted = await (0,_request__rspack_import_2.requestAPI)('api/dataset/evaluation-jobs', settings, {
+                const submitted = await (0,_request__rspack_import_3.requestAPI)('api/dataset/evaluation-jobs', settings, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
@@ -4962,7 +7849,7 @@ class ModelMindStudioWidget extends _lumino_widgets__rspack_import_0.Widget {
                 cancelBtn.disabled = false;
                 if (!isRequestCurrent()) {
                     try {
-                        await (0,_request__rspack_import_2.requestAPI)(`api/dataset/evaluation-jobs/${jobId}/cancel`, settings, { method: 'POST' });
+                        await (0,_request__rspack_import_3.requestAPI)(`api/dataset/evaluation-jobs/${jobId}/cancel`, settings, { method: 'POST' });
                     }
                     catch (_c) {
                         // The server will still enforce its job timeout.
@@ -4973,18 +7860,18 @@ class ModelMindStudioWidget extends _lumino_widgets__rspack_import_0.Widget {
                 for (let attempt = 0; attempt < 180; attempt++) {
                     if (!isRequestCurrent()) {
                         try {
-                            await (0,_request__rspack_import_2.requestAPI)(`api/dataset/evaluation-jobs/${jobId}/cancel`, settings, { method: 'POST' });
+                            await (0,_request__rspack_import_3.requestAPI)(`api/dataset/evaluation-jobs/${jobId}/cancel`, settings, { method: 'POST' });
                         }
                         catch (_d) {
                             // Panel has closed; the server still owns job cleanup.
                         }
                         return;
                     }
-                    const job = await (0,_request__rspack_import_2.requestAPI)(`api/dataset/evaluation-jobs/${jobId}`, settings);
+                    const job = await (0,_request__rspack_import_3.requestAPI)(`api/dataset/evaluation-jobs/${jobId}`, settings);
                     // Ignore results belonging to an obsolete selection.
                     if (!isRequestCurrent()) {
                         try {
-                            await (0,_request__rspack_import_2.requestAPI)(`api/dataset/evaluation-jobs/${jobId}/cancel`, settings, { method: 'POST' });
+                            await (0,_request__rspack_import_3.requestAPI)(`api/dataset/evaluation-jobs/${jobId}/cancel`, settings, { method: 'POST' });
                         }
                         catch (_e) {
                             // A completed job cannot necessarily be cancelled.
@@ -5005,45 +7892,52 @@ class ModelMindStudioWidget extends _lumino_widgets__rspack_import_0.Widget {
                             automl.recommendations.length === 0) {
                             throw new Error('Completed evaluation has no valid AutoML recommendations.');
                         }
-                        const models = automl.recommendations.map((item, index) => ({
-                            name: item.name,
-                            rank: index + 1,
-                            medal: index === 0 ? '🥇' :
-                                index === 1 ? '🥈' :
-                                    index === 2 ? '🥉' : '🏅',
-                            score: 0,
-                            tags: [
-                                'Measured CV',
-                                automl.task === 'regression'
-                                    ? 'Regression'
-                                    : 'Classification'
-                            ],
-                            why: 'Selected using measured cross-validation ' +
-                                'performance among the evaluated finalists. ' +
-                                'The score is an estimate, not a guarantee ' +
-                                'of performance on new data.',
-                            strengths: [
-                                'Evaluated on the selected dataset',
-                                'Preprocessing fitted within CV folds'
-                            ],
-                            weaknesses: [
-                                'Performance depends on the dataset',
-                                'Final holdout performance may differ'
-                            ],
-                            best_for: 'Datasets where this algorithm performs well ' +
-                                'under the selected evaluation procedure.',
-                            training_speed: 'Dataset dependent',
-                            complexity: 'Model dependent',
-                            interpretability: 'Model dependent',
-                            code: item.code_available ? item.code : '',
-                            defaultCode: item.code_available ? item.code : '',
-                            automl_measured: true,
-                            measured_score: item.measured_score,
-                            measured_std: item.std_score,
-                            automl_task: automl.task,
-                            code_available: item.code_available,
-                            code_error: item.code_error
-                        }));
+                        const models = automl.recommendations.map((item, index) => {
+                            var _a, _b, _c;
+                            const rank = Number.isInteger(item.rank)
+                                ? item.rank
+                                : index + 1;
+                            const explanation = (0,_model_advisor_explanations__rspack_import_5.buildMeasuredModelExplanation)({
+                                name: String(item.name),
+                                task: automl.task,
+                                metric: String((_b = (_a = item.metric) !== null && _a !== void 0 ? _a : automl.metric) !== null && _b !== void 0 ? _b : 'CV score'),
+                                score: item.measured_score,
+                                scoreStd: item.std_score,
+                                rank,
+                                finalistCount: automl.recommendations.length,
+                                candidateCount: automl.candidate_count,
+                                cvFolds: (_c = item.cv_folds) !== null && _c !== void 0 ? _c : automl.cv_folds
+                            });
+                            return {
+                                name: item.name,
+                                rank,
+                                medal: rank === 1 ? '🥇' :
+                                    rank === 2 ? '🥈' :
+                                        rank === 3 ? '🥉' : '🏅',
+                                score: 0,
+                                tags: [
+                                    'Measured CV',
+                                    automl.task === 'regression'
+                                        ? 'Regression'
+                                        : 'Classification'
+                                ],
+                                why: explanation.why,
+                                strengths: explanation.strengths,
+                                weaknesses: explanation.weaknesses,
+                                best_for: explanation.bestFor,
+                                training_speed: explanation.trainingSpeed,
+                                complexity: explanation.complexity,
+                                interpretability: explanation.interpretability,
+                                code: item.code_available ? item.code : '',
+                                defaultCode: item.code_available ? item.code : '',
+                                automl_measured: true,
+                                measured_score: item.measured_score,
+                                measured_std: item.std_score,
+                                automl_task: automl.task,
+                                code_available: item.code_available,
+                                code_error: item.code_error
+                            };
+                        });
                         const rendered = {
                             ...original,
                             models,
@@ -5268,11 +8162,17 @@ class ModelMindStudioWidget extends _lumino_widgets__rspack_import_0.Widget {
                     'the original finalists. Parameter selection can still overfit CV; ' +
                     'confirm a final model on a separate test set before deployment.';
             output.appendChild(note);
-            const ranking = Array.isArray(result === null || result === void 0 ? void 0 : result.results)
+            const results = Array.isArray(result === null || result === void 0 ? void 0 : result.results)
                 ? result.results
-                : Array.isArray(result === null || result === void 0 ? void 0 : result.ranking)
-                    ? result.ranking
-                    : [];
+                : [];
+            const rankedResults = Array.isArray(result === null || result === void 0 ? void 0 : result.ranking)
+                ? result.ranking
+                : results;
+            const rankedNames = new Set(rankedResults.map((item) => item === null || item === void 0 ? void 0 : item.model));
+            const ranking = [
+                ...rankedResults,
+                ...results.filter((item) => !rankedNames.has(item === null || item === void 0 ? void 0 : item.model))
+            ];
             if (!ranking.length) {
                 const message = document.createElement('pre');
                 message.style.cssText =
@@ -5304,7 +8204,7 @@ class ModelMindStudioWidget extends _lumino_widgets__rspack_import_0.Widget {
                 return JSON.stringify(value);
             };
             ranking.forEach((item, index) => {
-                var _a, _b, _c;
+                var _a, _b, _c, _d, _e;
                 const card = document.createElement('div');
                 card.style.cssText =
                     'padding:12px;margin:8px 0;' +
@@ -5345,6 +8245,11 @@ class ModelMindStudioWidget extends _lumino_widgets__rspack_import_0.Widget {
                                     `${formatValue(rec.default)} → ` +
                                     `${formatValue(rec.recommended)}`;
                             parameterText.appendChild(row);
+                            const reason = document.createElement('div');
+                            reason.style.cssText =
+                                'font-size:10px;color:#64748b;margin:0 0 4px 8px;';
+                            reason.textContent = (0,_tuning_explanations__rspack_import_6.explainTuningParameter)(String(rec.parameter));
+                            parameterText.appendChild(reason);
                         });
                     }
                     else {
@@ -5360,8 +8265,9 @@ class ModelMindStudioWidget extends _lumino_widgets__rspack_import_0.Widget {
                     const state = String((_c = item === null || item === void 0 ? void 0 : item.recommendation_status) !== null && _c !== void 0 ? _c : '');
                     if (state === 'partial_defaults_recommended') {
                         parameterText.textContent =
-                            'Default parameters performed best so far. ' +
-                                'Search incomplete — more configurations remain untested.';
+                            'Defaults are the best-supported choice so far. ' +
+                                'The baseline settings are kept; the search is incomplete, ' +
+                                'so untested configurations could differ.';
                     }
                     else if (state === 'insufficient_validation') {
                         parameterText.textContent =
@@ -5375,8 +8281,9 @@ class ModelMindStudioWidget extends _lumino_widgets__rspack_import_0.Widget {
                     }
                     else if (state === 'defaults_recommended') {
                         parameterText.textContent =
-                            'Keep default parameters. Tested alternatives ' +
-                                'did not provide a meaningful improvement.';
+                            'Default parameters are the best-supported choice: no tested ' +
+                                'alternative beat the baseline by a meaningful, consistent ' +
+                                'margin on the same CV folds.';
                     }
                     else if (state === 'baseline_unavailable') {
                         parameterText.textContent =
@@ -5402,10 +8309,27 @@ class ModelMindStudioWidget extends _lumino_widgets__rspack_import_0.Widget {
                     const comparison = document.createElement('div');
                     comparison.style.cssText =
                         'font-size:10px;color:#64748b;margin-top:6px;';
+                    const selectedScore = item === null || item === void 0 ? void 0 : item.best_score;
+                    const selectedText = typeof selectedScore === 'number' &&
+                        Number.isFinite(selectedScore)
+                        ? ` • Recommended CV: ${formattedScore(item)}`
+                        : '';
                     comparison.textContent =
-                        `Default CV: ${baseline.toFixed(4)} • ` +
-                            `Best tested CV: ${bestTested.toFixed(4)}`;
+                        `Default CV: ${formattedScore({ best_score: baseline })} • ` +
+                            `Best tested CV: ${formattedScore({ best_score: bestTested })}` +
+                            selectedText;
                     parameterText.appendChild(comparison);
+                    const improvement = item === null || item === void 0 ? void 0 : item.improvement_over_default;
+                    if (typeof improvement === 'number' &&
+                        Number.isFinite(improvement)) {
+                        const gain = document.createElement('div');
+                        gain.style.cssText =
+                            'font-size:10px;color:#475569;margin-top:4px;';
+                        gain.textContent = task === 'classification'
+                            ? `Best tested change vs. default: ${(improvement * 100).toFixed(2)} percentage points in ${String((_d = result === null || result === void 0 ? void 0 : result.metric) !== null && _d !== void 0 ? _d : 'CV score')}.`
+                            : `Best tested RMSE change vs. default: ${improvement.toFixed(4)} lower is better.`;
+                        parameterText.appendChild(gain);
+                    }
                 }
                 const testedCount = item === null || item === void 0 ? void 0 : item.configurations_tested;
                 const plannedCount = item === null || item === void 0 ? void 0 : item.configurations_planned;
@@ -5427,23 +8351,61 @@ class ModelMindStudioWidget extends _lumino_widgets__rspack_import_0.Widget {
                         'Partial search: not all configurations were tested.';
                     parameterText.appendChild(warning);
                 }
+                const recommendationReason = document.createElement('div');
+                recommendationReason.style.cssText =
+                    'font-size:10.5px;color:#334155;margin-top:7px;line-height:1.5;';
+                const recommendationStatus = String((_e = item === null || item === void 0 ? void 0 : item.recommendation_status) !== null && _e !== void 0 ? _e : '');
+                if (recommendationStatus === 'parameter_changes_recommended' ||
+                    recommendationStatus === 'partial_parameter_changes') {
+                    recommendationReason.textContent =
+                        'Why these settings: this tested configuration was better than the default on the same CV folds and cleared the practical-gain and fold-consistency checks.' +
+                            ((item === null || item === void 0 ? void 0 : item.completed) === false
+                                ? ' The search is incomplete, so treat this as provisional.'
+                                : '');
+                }
+                else if (recommendationStatus === 'defaults_recommended' ||
+                    recommendationStatus === 'partial_defaults_recommended') {
+                    recommendationReason.textContent =
+                        'Why keep defaults: the baseline is the best-supported configuration. No tested alternative showed a sufficiently large, consistent improvement across the same CV folds.' +
+                            ((item === null || item === void 0 ? void 0 : item.completed) === false
+                                ? ' The search is incomplete; untested settings may differ.'
+                                : '');
+                }
+                else if (recommendationStatus === 'insufficient_validation') {
+                    recommendationReason.textContent =
+                        'Why no tuning change: too few CV folds were available to distinguish a real gain from fold-to-fold variation.';
+                }
+                else if (recommendationStatus === 'baseline_unavailable') {
+                    recommendationReason.textContent =
+                        'Why no tuning change: without a valid default baseline, a fair parameter comparison is not possible.';
+                }
+                if (recommendationReason.textContent) {
+                    parameterText.appendChild(recommendationReason);
+                }
                 if (typeof (item === null || item === void 0 ? void 0 : item.code) === 'string' && item.code.trim()) {
                     const tunedCode = item.code;
+                    const hasRecommendedChanges = Object.keys(params).length > 0;
                     const codeNotice = document.createElement('div');
                     codeNotice.style.cssText =
                         'font-size:10.5px;color:#047857;margin-top:6px;font-weight:600;display:flex;align-items:center;gap:4px;';
-                    codeNotice.innerHTML = '<span>⚡ Tuned! Recommendations shown on Model Advisor card above. The main insert button still inserts <b>baseline code</b> — apply changes manually.</span>';
+                    codeNotice.textContent = hasRecommendedChanges
+                        ? 'CV-selected parameter values are applied in this code. The Model Advisor card keeps its baseline code separately.'
+                        : 'Defaults are the best-supported choice. This inserts the same default estimator settings as the baseline code; no parameter change passed the CV checks.';
                     parameterText.appendChild(codeNotice);
                     const actionRow = document.createElement('div');
-                    actionRow.style.cssText = 'display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;';
+                    actionRow.style.cssText =
+                        'display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;';
                     const insertTunedBtn = document.createElement('button');
                     insertTunedBtn.type = 'button';
                     insertTunedBtn.className = 'mm-studio-btn mm-btn-sm mm-btn-primary';
                     insertTunedBtn.style.cssText = 'background:#059669;border-color:#047857;color:#fff;font-weight:600;';
-                    insertTunedBtn.innerHTML = '📥 Insert Tuned Code into Notebook';
+                    insertTunedBtn.textContent =
+                        hasRecommendedChanges
+                            ? '📥 Insert CV-Selected Code'
+                            : '📥 Insert Default Code';
                     insertTunedBtn.addEventListener('click', () => {
                         const ok = this._insertCodeBelow(tunedCode);
-                        this._showToast(ok ? `✓ Tuned ${modelName} code inserted into notebook!` : 'Open a notebook first.');
+                        this._showToast(ok ? `✓ CV-selected ${modelName} code inserted into notebook!` : 'Open a notebook first.');
                     });
                     const copyTunedBtn = document.createElement('button');
                     copyTunedBtn.type = 'button';
@@ -5461,7 +8423,12 @@ class ModelMindStudioWidget extends _lumino_widgets__rspack_import_0.Widget {
                     previewTunedBtn.addEventListener('click', () => {
                         this._showCodePreviewModal(modelName + ' (Tuned)', tunedCode, 'advanced');
                     });
-                    actionRow.append(insertTunedBtn, copyTunedBtn, previewTunedBtn);
+                    if (!this._canUseCodeAction('insert')) {
+                        actionRow.append(previewTunedBtn);
+                    }
+                    else {
+                        actionRow.append(insertTunedBtn, copyTunedBtn, previewTunedBtn);
+                    }
                     card.appendChild(actionRow);
                 }
                 else if (typeof (item === null || item === void 0 ? void 0 : item.code_error) === 'string') {
@@ -5499,7 +8466,7 @@ class ModelMindStudioWidget extends _lumino_widgets__rspack_import_0.Widget {
             cancelButton.disabled = true;
             status.textContent = 'Cancellation requested...';
             try {
-                await (0,_request__rspack_import_2.requestAPI)(`api/dataset/tuning-jobs/${activeJobId}/cancel`, settings, { method: 'POST' });
+                await (0,_request__rspack_import_3.requestAPI)(`api/dataset/tuning-jobs/${activeJobId}/cancel`, settings, { method: 'POST' });
             }
             catch (error) {
                 status.textContent =
@@ -5521,7 +8488,7 @@ class ModelMindStudioWidget extends _lumino_widgets__rspack_import_0.Widget {
             const chosenLevel = modeSelect.value;
             status.textContent = `Submitting ${chosenLevel} tuning for Top 5...`;
             try {
-                const submitted = await (0,_request__rspack_import_2.requestAPI)('api/dataset/tuning-jobs', settings, {
+                const submitted = await (0,_request__rspack_import_3.requestAPI)('api/dataset/tuning-jobs', settings, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
@@ -5551,20 +8518,20 @@ class ModelMindStudioWidget extends _lumino_widgets__rspack_import_0.Widget {
                                 'unless it is cancelled or reaches its timeout.';
                         break;
                     }
-                    const job = await (0,_request__rspack_import_2.requestAPI)(`api/dataset/tuning-jobs/${activeJobId}`, settings);
+                    const job = await (0,_request__rspack_import_3.requestAPI)(`api/dataset/tuning-jobs/${activeJobId}`, settings);
                     const jobStatus = String((_a = job === null || job === void 0 ? void 0 : job.status) !== null && _a !== void 0 ? _a : 'unknown');
                     status.textContent = `Fast tuning: ${jobStatus}`;
                     if (jobStatus === 'completed') {
                         terminal = true;
-                        (0,_model_code_utils__rspack_import_4.resetTunedModelCode)(advisorModels);
+                        (0,_model_code_utils__rspack_import_7.resetTunedModelCode)(advisorModels);
                         printResult(job.result);
-                        const codeSync = (0,_model_code_utils__rspack_import_4.applyTunedModelCode)(advisorModels, (_b = job.result) === null || _b === void 0 ? void 0 : _b.results);
+                        const codeSync = (0,_model_code_utils__rspack_import_7.applyTunedModelCode)(advisorModels, (_b = job.result) === null || _b === void 0 ? void 0 : _b.results);
                         status.textContent =
                             `Tuning finished: ${String((_d = (_c = job.result) === null || _c === void 0 ? void 0 : _c.models_completed) !== null && _d !== void 0 ? _d : 0)}/` +
                                 `${names.length} models fully searched.` +
                                 (((_e = job.result) === null || _e === void 0 ? void 0 : _e.timed_out) ? ' Time budget reached.' : '') +
-                                ` ${codeSync.updated} Model Advisor card(s) now show tuning recommendations.` +
-                                ' The "Insert into Notebook" button still inserts baseline code — apply the shown parameter changes manually!';
+                                ` ${codeSync.updated} Model Advisor card(s) now have CV-checked code.` +
+                                ' Only changes with a meaningful, consistent CV gain replace defaults; holdout accuracy can still differ.';
                         break;
                     }
                     if (['failed', 'cancelled', 'timed_out'].includes(jobStatus)) {
@@ -5610,13 +8577,13 @@ class ModelMindStudioWidget extends _lumino_widgets__rspack_import_0.Widget {
             const src = (typeof model.defaultCode === 'string' && model.defaultCode.trim())
                 ? model.defaultCode
                 : model.code;
-            return typeof src === 'string' ? (0,_model_code_utils__rspack_import_4.removeModelAdvisorRaiseGuards)(src) : '';
+            return typeof src === 'string' ? (0,_model_code_utils__rspack_import_7.removeModelAdvisorRaiseGuards)(src) : '';
         };
         const getTunedCode = () => {
             const src = (typeof model.tuned_code === 'string' && model.tuned_code.trim())
                 ? model.tuned_code
                 : (typeof model.code === 'string' ? model.code : model.defaultCode);
-            return typeof src === 'string' ? (0,_model_code_utils__rspack_import_4.removeModelAdvisorRaiseGuards)(src) : '';
+            return typeof src === 'string' ? (0,_model_code_utils__rspack_import_7.removeModelAdvisorRaiseGuards)(src) : '';
         };
         // The Model Advisor card always provides the clean baseline model code without tuning
         const getModelCode = () => getBaselineCode();
@@ -5837,6 +8804,7 @@ class ModelMindStudioWidget extends _lumino_widgets__rspack_import_0.Widget {
                 : 'Open a notebook first.');
         });
         model.refreshCode = () => {
+            var _a;
             const available = Boolean(getBaselineCode());
             codePre.textContent = getBaselineCode() || '# No code available';
             codeToggleBtn.disabled = !available;
@@ -5870,24 +8838,54 @@ class ModelMindStudioWidget extends _lumino_widgets__rspack_import_0.Widget {
                         changesList.appendChild(itemEl);
                     });
                 }
+                if (changesList.childElementCount === 0 &&
+                    model.tuned_recommendation_status === 'defaults_recommended') {
+                    changesList.textContent =
+                        'Default parameters are the best-supported choice: no tested alternative beat the baseline by a meaningful, consistent margin on the same CV folds.';
+                }
+                else if (changesList.childElementCount === 0 &&
+                    model.tuned_recommendation_status === 'insufficient_validation') {
+                    changesList.textContent =
+                        'Defaults were retained because there were not enough CV folds to support a reliable tuning decision.';
+                }
+                else if (changesList.childElementCount === 0) {
+                    changesList.textContent =
+                        'No parameter changes were validated. The generated code preserves the baseline settings.';
+                }
                 const bannerNote = document.createElement('div');
-                bannerNote.style.cssText = 'font-size:10.5px; color:#475569; margin-top:6px; line-height:1.4;';
+                bannerNote.style.cssText =
+                    'font-size:10.5px; color:#475569; margin-top:6px; line-height:1.4;';
                 bannerNote.innerHTML =
-                    '<b>Workflow:</b> <i>"Insert Baseline Code"</i> inserts the model code before tuning. ' +
-                        'Run it first in your notebook, then manually change the parameter values as shown above to compare results!';
+                    '<b>Evaluation note:</b> The recommended code applies the tested estimator settings; when defaults are recommended, it uses the same estimator settings as baseline code. ' +
+                        'Its held-out score can differ from CV, and no tuning search can guarantee higher accuracy on new data.';
                 const bannerActions = document.createElement('div');
-                bannerActions.style.cssText = 'display:flex; gap:8px; margin-top:8px; align-items:center; flex-wrap:wrap;';
+                bannerActions.style.cssText =
+                    'display:flex; gap:8px; margin-top:8px; align-items:center; flex-wrap:wrap;';
+                const previewTunedDirectBtn = document.createElement('button');
+                previewTunedDirectBtn.type = 'button';
+                previewTunedDirectBtn.className = 'mm-studio-btn mm-btn-sm';
+                previewTunedDirectBtn.textContent = '🔍 Preview Recommended Code';
+                previewTunedDirectBtn.addEventListener('click', () => {
+                    this._showCodePreviewModal(model.name + ' (Recommended)', getTunedCode(), 'advanced');
+                });
                 const insertTunedDirectBtn = document.createElement('button');
                 insertTunedDirectBtn.type = 'button';
                 insertTunedDirectBtn.className = 'mm-studio-btn mm-btn-sm';
                 insertTunedDirectBtn.style.cssText =
                     'background:#f0fdf4; border:1px solid #86efac; color:#15803d; font-weight:600; font-size:10.5px; cursor:pointer;';
-                insertTunedDirectBtn.innerHTML = '⚡ Insert Already-Tuned Code Instead';
+                insertTunedDirectBtn.innerHTML = ((_a = model.tuned_changes) === null || _a === void 0 ? void 0 : _a.length)
+                    ? '⚡ Insert CV-Selected Code'
+                    : '⚡ Insert Recommended Default Code';
                 insertTunedDirectBtn.addEventListener('click', () => {
                     const ok = this._insertCodeBelow(getTunedCode());
                     this._showToast(ok ? `✓ Tuned ${model.name} code inserted!` : 'Open a notebook first.');
                 });
-                bannerActions.append(insertTunedDirectBtn);
+                if (!this._canUseCodeAction('insert')) {
+                    bannerActions.append(previewTunedDirectBtn);
+                }
+                else {
+                    bannerActions.append(insertTunedDirectBtn);
+                }
                 tunedBanner.append(bannerHdr, changesList, bannerNote, bannerActions);
             }
             else {
@@ -5910,7 +8908,12 @@ class ModelMindStudioWidget extends _lumino_widgets__rspack_import_0.Widget {
                 model.code_error || 'Executable code is unavailable.';
             card.appendChild(note);
         }
-        btnRow.append(previewBtn, copyBtn2, insertBtn2);
+        if (!this._canUseCodeAction('insert')) {
+            btnRow.append(previewBtn);
+        }
+        else {
+            btnRow.append(previewBtn, copyBtn2, insertBtn2);
+        }
         card.append(tunedBanner, btnRow);
         // Initialize display state
         model.refreshCode();
@@ -6355,118 +9358,7 @@ class ModelMindStudioWidget extends _lumino_widgets__rspack_import_0.Widget {
         container.appendChild(wrap);
     }
     // ═════════════════════════════════════════════════════════════════
-    // VIEW 6: ⚠️ ML INSPECTOR (MISTAKE DETECTOR)
-    // ═════════════════════════════════════════════════════════════════
-    _renderInspectorTab() {
-        const frag = document.createDocumentFragment();
-        const hdr = document.createElement('div');
-        hdr.className = 'mm-studio-section';
-        hdr.innerHTML = `
-      <div class="mm-studio-sec-title"><span>⚠️</span> ML Code Inspector & Leakage Checker</div>
-      <div class="mm-studio-sec-sub">Scans code for data leakage, invalid scaling order, and ML anti-patterns.</div>
-    `;
-        const codeArea = document.createElement('textarea');
-        codeArea.className = 'mm-inspector-textarea';
-        codeArea.placeholder = 'Paste or scan Python ML code here...';
-        // Auto-populate from active cell if available
-        const activeCell = this._notebooks.activeCell;
-        if (activeCell && (0,_jupyterlab_cells__rspack_import_1.isCodeCellModel)(activeCell.model)) {
-            const src = activeCell.model.toJSON().source;
-            codeArea.value = Array.isArray(src) ? src.join('') : src;
-        }
-        const btnRow = document.createElement('div');
-        btnRow.style.cssText = 'display:flex; gap:8px; margin-top:8px;';
-        const scanActiveBtn = document.createElement('button');
-        scanActiveBtn.type = 'button';
-        scanActiveBtn.className = 'mm-studio-btn mm-btn-sm';
-        scanActiveBtn.innerHTML = '⚡ Fetch Active Cell';
-        scanActiveBtn.addEventListener('click', () => {
-            const cell = this._notebooks.activeCell;
-            if (cell && (0,_jupyterlab_cells__rspack_import_1.isCodeCellModel)(cell.model)) {
-                const src = cell.model.toJSON().source;
-                codeArea.value = Array.isArray(src) ? src.join('') : src;
-                this._showToast('Fetched active cell code.');
-            }
-            else {
-                this._showToast('Select an active code cell first.');
-            }
-        });
-        const checkBtn = document.createElement('button');
-        checkBtn.type = 'button';
-        checkBtn.className = 'mm-studio-btn mm-btn-sm mm-btn-primary';
-        checkBtn.innerHTML = '🔍 Scan for ML Mistakes';
-        btnRow.append(scanActiveBtn, checkBtn);
-        hdr.append(codeArea, btnRow);
-        frag.appendChild(hdr);
-        const resultContainer = document.createElement('div');
-        resultContainer.className = 'mm-inspector-results';
-        frag.appendChild(resultContainer);
-        checkBtn.addEventListener('click', async () => {
-            const code = codeArea.value.trim();
-            if (!code) {
-                resultContainer.innerHTML = '<div class="mm-studio-empty">Enter code to scan.</div>';
-                return;
-            }
-            resultContainer.innerHTML = '<div class="mm-studio-loading">Inspecting AST for ML anti-patterns...</div>';
-            try {
-                const res = await (0,_request__rspack_import_2.requestAPI)('api/ai/ml-check', this._app.serviceManager.serverSettings, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ code, level: this._prepLevel })
-                });
-                resultContainer.replaceChildren();
-                if (res.finding_count === 0) {
-                    resultContainer.innerHTML = `
-            <div class="mm-studio-alert mm-alert-info">
-              ✅ <b>Clean Code:</b> No data leakage or critical ML methodology flaws detected!
-            </div>
-          `;
-                    return;
-                }
-                const countHeader = document.createElement('div');
-                countHeader.style.cssText = 'font-weight:700; font-size:12px; margin-bottom:8px; color:#f87171;';
-                countHeader.textContent = `Found ${res.finding_count} potential ML mistake(s):`;
-                resultContainer.appendChild(countHeader);
-                res.findings.forEach(f => {
-                    const card = document.createElement('div');
-                    card.className = 'mm-studio-card mm-mistake-card';
-                    const sevColor = f.severity === 'high' ? '#ef4444' : '#f59e0b';
-                    const msg = f.message || f.what_happened || '';
-                    const expl = f.explanation || f.why_it_matters || f.recommendation || '';
-                    const fix = f.suggested_fix || f.code_example || '';
-                    card.innerHTML = `
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
-              <span style="font-weight:700; font-size:12px; color:${sevColor};">${f.title}</span>
-              <span class="mm-studio-badge" style="background:${sevColor}22; color:${sevColor}; border:1px solid ${sevColor}44;">
-                ${f.severity.toUpperCase()}
-              </span>
-            </div>
-            ${f.line_number ? `<div style="font-size:10px; opacity:.6; margin-bottom:4px;">Line: ${f.line_number}</div>` : ''}
-            <div style="font-size:11px; margin-bottom:6px;">${msg}</div>
-            ${expl ? `<div style="font-size:11px; opacity:.85; background:rgba(0,0,0,0.25); padding:6px 8px; border-radius:6px; font-family:monospace; margin-bottom:8px; line-height:1.4;">${expl}</div>` : ''}
-          `;
-                    if (fix) {
-                        const insBtn = document.createElement('button');
-                        insBtn.type = 'button';
-                        insBtn.className = 'mm-studio-btn mm-btn-sm mm-btn-primary';
-                        insBtn.textContent = '📥 Insert Fixed Code';
-                        insBtn.addEventListener('click', () => {
-                            this._insertCodeBelow(fix);
-                            this._showToast('Inserted corrected code into notebook!');
-                        });
-                        card.appendChild(insBtn);
-                    }
-                    resultContainer.appendChild(card);
-                });
-            }
-            catch (err) {
-                resultContainer.innerHTML = `<div class="mm-studio-alert mm-alert-error">${err instanceof Error ? err.message : 'Check failed.'}</div>`;
-            }
-        });
-        this._contentArea.appendChild(frag);
-    }
-    // ═════════════════════════════════════════════════════════════════
-    // VIEW 7: 📖 PREPROCESSING & ML GUIDE
+    // VIEW 6: 📖 PREPROCESSING & ML GUIDE
     // ═════════════════════════════════════════════════════════════════
     _renderGuideTab() {
         const frag = document.createDocumentFragment();
@@ -6526,7 +9418,19 @@ class ModelMindStudioWidget extends _lumino_widgets__rspack_import_0.Widget {
                 ? '✓ Install command inserted below the active cell. Run that cell to install the libraries.'
                 : 'Open a notebook and select a cell before inserting the install command.');
         });
-        installActions.appendChild(insertInstallButton);
+        if (!this._canUseCodeAction('copy')) {
+            const previewInstallButton = document.createElement('button');
+            previewInstallButton.type = 'button';
+            previewInstallButton.className = 'mm-studio-btn mm-btn-sm';
+            previewInstallButton.textContent = '🔍 Preview Code';
+            previewInstallButton.addEventListener('click', () => {
+                this._showCodePreviewModal('ML library install command', installCommand, 'basic');
+            });
+            installActions.replaceChildren(previewInstallButton);
+        }
+        else {
+            installActions.appendChild(insertInstallButton);
+        }
         installCard.append(installTitle, installDescription, installCode, installActions);
         frag.appendChild(installCard);
         const guides = [
@@ -6652,20 +9556,59 @@ function createModelMindStudioWidget(app, notebooks) {
 
 
 },
+"./lib/notebook-mode.js"(__unused_rspack_module, __webpack_exports__, __webpack_require__) {
+__webpack_require__.r(__webpack_exports__);
+__webpack_require__.d(__webpack_exports__, {
+  MODEL_MIND_NOTEBOOK_TYPE: () => (MODEL_MIND_NOTEBOOK_TYPE),
+  canUseNotebookCodeAction: () => (canUseNotebookCodeAction),
+  getModelMindNotebookRole: () => (getModelMindNotebookRole)
+});
+const MODEL_MIND_NOTEBOOK_TYPE = 'modelmind_notebook_type';
+function getModelMindNotebookRole(model) {
+    return (model === null || model === void 0 ? void 0 : model.getMetadata(MODEL_MIND_NOTEBOOK_TYPE)) === 'trainer'
+        ? 'trainer'
+        : 'modelmind';
+}
+function canUseNotebookCodeAction(role, action) {
+    return role !== 'trainer' || action === 'preview';
+}
+
+
+},
 "./lib/preprocessing-code-utils.js"(__unused_rspack_module, __webpack_exports__, __webpack_require__) {
 __webpack_require__.r(__webpack_exports__);
 __webpack_require__.d(__webpack_exports__, {
+  buildDatasetLoadingCode: () => (buildDatasetLoadingCode),
   buildFullPreprocessingCode: () => (buildFullPreprocessingCode)
 });
-function buildFullPreprocessingCode(selectedPath, rec, selectedStrategy) {
+function buildDatasetLoadingCode(selectedPath) {
     var _a;
     const datasetPath = JSON.stringify(selectedPath);
-    const extension = (_a = selectedPath.split(/[?#]/, 1)[0].split('.').pop()) === null || _a === void 0 ? void 0 : _a.toLowerCase();
+    const extension = (_a = selectedPath
+        .split(/[?#]/, 1)[0]
+        .split('.')
+        .pop()) === null || _a === void 0 ? void 0 : _a.toLowerCase();
     const reader = extension === 'xlsx' || extension === 'xls'
         ? 'read_excel'
         : extension === 'json'
             ? 'read_json'
             : 'read_csv';
+    return [
+        'import pandas as pd',
+        '',
+        `df = pd.${reader}(${datasetPath})`,
+        'print(f"Loaded dataset: {df.shape[0]} rows × {df.shape[1]} columns")'
+    ].join('\n');
+}
+function buildFullPreprocessingCode(selectedPath, rec, selectedStrategy, recommendedCode) {
+    if (recommendedCode === null || recommendedCode === void 0 ? void 0 : recommendedCode.trim()) {
+        return [
+            '# Recommended preprocessing workflow for the selected skill level',
+            buildDatasetLoadingCode(selectedPath),
+            '',
+            recommendedCode.trim()
+        ].join('\n');
+    }
     const imports = new Set(['import pandas as pd']);
     let strategy = selectedStrategy;
     if (strategy === 'most_frequent_or_unknown') {
@@ -6695,7 +9638,9 @@ function buildFullPreprocessingCode(selectedPath, rec, selectedStrategy) {
         case 'constant':
             operation = [
                 ...(rec.feature_type === 'numerical'
-                    ? [`${featureAccess} = pd.to_numeric(${featureAccess}, errors="coerce")`]
+                    ? [
+                        `${featureAccess} = pd.to_numeric(${featureAccess}, errors="coerce")`
+                    ]
                     : []),
                 `${featureAccess} = ${featureAccess}.fillna(${rec.feature_type === 'numerical' ? '0' : '"Unknown"'})`
             ].join('\n');
@@ -6751,7 +9696,7 @@ function buildFullPreprocessingCode(selectedPath, rec, selectedStrategy) {
         '# Complete preprocessing workflow for the analyzed dataset',
         ...Array.from(imports),
         '',
-        `df = pd.${reader}(${datasetPath})`,
+        `df = pd.${getDatasetReader(selectedPath)}(${JSON.stringify(selectedPath)})`,
         'print(f"Loaded dataset: {df.shape[0]} rows × {df.shape[1]} columns")',
         '',
         '# Apply preprocessing only to the selected column',
@@ -6763,11 +9708,25 @@ function buildFullPreprocessingCode(selectedPath, rec, selectedStrategy) {
         '',
         '# Preview only the selected column or its encoded output columns',
         ...(strategy === 'one_hot_encode'
-            ? [`print(df.loc[:, [column for column in df.columns if column == ${featureName} or column.startswith(${JSON.stringify(`${rec.feature}_`)})]].head())`]
+            ? [
+                `print(df.loc[:, [column for column in df.columns if column == ${featureName} or column.startswith(${JSON.stringify(`${rec.feature}_`)})]].head())`
+            ]
             : strategy === 'drop_column'
                 ? ['print("Selected column was dropped as requested.")']
-                : [`print(df[[${featureName}]].head())`]),
+                : [`print(df[[${featureName}]].head())`])
     ].join('\n');
+}
+function getDatasetReader(selectedPath) {
+    var _a;
+    const extension = (_a = selectedPath
+        .split(/[?#]/, 1)[0]
+        .split('.')
+        .pop()) === null || _a === void 0 ? void 0 : _a.toLowerCase();
+    return extension === 'xlsx' || extension === 'xls'
+        ? 'read_excel'
+        : extension === 'json'
+            ? 'read_json'
+            : 'read_csv';
 }
 
 
@@ -6823,10 +9782,47 @@ async function requestAPI(endPoint, serverSettings, init = {}) {
 
 
 },
+"./lib/tuning-explanations.js"(__unused_rspack_module, __webpack_exports__, __webpack_require__) {
+__webpack_require__.r(__webpack_exports__);
+__webpack_require__.d(__webpack_exports__, {
+  explainTuningParameter: () => (explainTuningParameter)
+});
+const PARAMETER_EXPLANATIONS = {
+    alpha: 'Controls coefficient regularization; larger values penalize model complexity more strongly.',
+    ccp_alpha: 'Controls cost-complexity pruning; larger values prune more of the tree.',
+    C: 'Inverse regularization strength; smaller values apply stronger regularization.',
+    class_weight: 'Can give minority classes more influence when class frequencies are uneven.',
+    colsample_bytree: 'Controls the fraction of input features sampled for each boosted tree.',
+    epsilon: 'Sets the error-insensitive margin in support-vector regression.',
+    gamma: 'Controls the reach of the RBF kernel; larger values make its influence more local.',
+    l1_ratio: 'Sets the blend between L1 sparsity and L2 coefficient shrinkage.',
+    learning_rate: 'Controls each boosting step; smaller steps often need more trees.',
+    max_depth: 'Limits tree depth and therefore the complexity of learned decision rules.',
+    max_features: 'Limits the features considered for a tree split, affecting diversity and fit.',
+    max_iter: 'Sets the number of boosting iterations or optimization steps.',
+    max_leaf_nodes: 'Limits the number of leaves and therefore tree complexity.',
+    max_samples: 'Controls the number or fraction of training rows sampled for an ensemble.',
+    min_samples_leaf: 'Requires a minimum number of examples at each leaf, which can smooth predictions.',
+    min_samples_split: 'Requires a minimum number of examples before a node can split.',
+    n_estimators: 'Sets how many trees are combined in the ensemble.',
+    n_neighbors: 'Sets how many nearby training examples contribute to a K-nearest-neighbor prediction.',
+    p: 'Chooses the Minkowski distance: 1 is Manhattan distance and 2 is Euclidean distance.',
+    reg_lambda: 'Controls L2 regularization of boosted-tree weights.',
+    subsample: 'Controls the fraction of training rows sampled for each boosting step.',
+    var_smoothing: 'Adds stability to small feature variances in Gaussian Naive Bayes.',
+    weights: 'Distance weighting gives closer neighbors more influence than equally weighted neighbors.'
+};
+function explainTuningParameter(parameter) {
+    var _a;
+    return ((_a = PARAMETER_EXPLANATIONS[parameter]) !== null && _a !== void 0 ? _a : 'This setting controls model fit or complexity; its displayed value was selected by the measured cross-validation comparison.');
+}
+
+
+},
 "./style/modelmind-logo.png"(module, __unused_rspack_exports, __webpack_require__) {
 module.exports = __webpack_require__.p + "68c5c2a70ed031f3.png";
 
 },
 
 }]);
-//# sourceMappingURL=lib_index_js.c723e4fa7fc7d53c.js.map
+//# sourceMappingURL=lib_index_js.03062c7ba77f6f0c.js.map

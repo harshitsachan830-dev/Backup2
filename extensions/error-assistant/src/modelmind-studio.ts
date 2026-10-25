@@ -7,8 +7,7 @@
  *  3. 📊 Feature Analyzer (Distribution Plots, Cardinality, Stats)
  *  4. 🧠 Smart Preprocessing Adviser 2.0 (Recommendations, Live Preview, Apply & Undo, Code Gen)
  *  5. ⚗️ Model Visualization Lab (Interactive Gradient Descent, Decision Tree, KNN, K-Means, PCA)
- *  6. ⚠️ ML Inspector (Static AST Data Leakage & Methodology Checker)
- *  7. 📖 Preprocessing & ML Guide (Educational Best Practices)
+ *  6. 📖 Preprocessing & ML Guide (Educational Best Practices)
  */
 
 import { Widget } from '@lumino/widgets';
@@ -17,12 +16,22 @@ import { INotebookTracker } from '@jupyterlab/notebook';
 import { isCodeCellModel } from '@jupyterlab/cells';
 import { requestAPI } from './request';
 import {
+  canUseNotebookCodeAction,
+  getModelMindNotebookRole
+} from './notebook-mode';
+import type { NotebookCodeAction } from './notebook-mode';
+import {
   IAdvisorModelCode,
   applyTunedModelCode,
   removeModelAdvisorRaiseGuards,
   resetTunedModelCode
 } from './model-code-utils';
-import { buildFullPreprocessingCode } from './preprocessing-code-utils';
+import {
+  buildDatasetLoadingCode,
+  buildFullPreprocessingCode
+} from './preprocessing-code-utils';
+import { buildMeasuredModelExplanation } from './model-advisor-explanations';
+import { explainTuningParameter } from './tuning-explanations';
 
 export interface DatasetSummary {
   supported: boolean;
@@ -91,6 +100,8 @@ export interface FeatureAnalysisResult {
   missing_count?: number;
   missing_percentage?: number;
   unique_count?: number;
+  numeric_kind?: 'continuous' | 'discrete' | 'unknown';
+  distribution_shape?: string;
   dtype?: string;
   is_numeric?: boolean;
   mean?: number;
@@ -129,8 +140,15 @@ export interface PreprocessingRec {
   missing_severity: 'none' | 'low' | 'moderate' | 'high' | 'very_high';
   unique_count: number;
   skewness?: number;
+  numeric_kind?: 'continuous' | 'discrete' | 'unknown';
+  distribution_shape?: string;
   outlier_count?: number;
   outlier_pct?: number;
+  outlier_percentage?: number;
+  imputation_reason?: string;
+  distribution_reason?: string;
+  transformation_strategy?: string;
+  transformation_reason?: string;
   imputation_strategy: string;
   scaling_strategy?: string;
   recommended_action: string;
@@ -161,46 +179,47 @@ export interface PreprocessingResult {
 
 export interface PreviewResult {
   feature: string;
+  feature_type?: 'numerical' | 'categorical';
   strategy: string;
   before: {
     missing_count: number;
     sample_values: Array<string | number | null>;
     mean?: number;
     median?: number;
+    statistics?: {
+      missing_count?: number;
+      missing_percentage?: number;
+      mean?: number;
+      median?: number;
+      std?: number | null;
+      skewness?: number | null;
+      min?: number | null;
+      max?: number | null;
+      pdf?: { edges: number[]; density: number[]; counts: number[]; sample_count: number };
+      kde?: { x: number[]; density: number[]; sample_count: number; bandwidth?: number | null };
+      category_distribution?: { categories: string[]; counts: number[]; percentages: number[]; sample_count: number };
+    };
   };
   after: {
     missing_count: number;
     sample_values: Array<string | number | null>;
     mean?: number;
     median?: number;
+    statistics?: PreviewResult['before']['statistics'];
   };
   details?: string;
-}
-
-export interface MLMistakeFinding {
-  rule_id: string;
-  title: string;
-  severity: 'high' | 'medium' | 'low';
-  line_number?: number;
-  message: string;
-  explanation: string;
-  suggested_fix?: string;
-}
-
-export interface MLMistakeResult {
-  handled: boolean;
-  finding_count: number;
-  findings: MLMistakeFinding[];
 }
 
 export class ModelMindStudioWidget extends Widget {
   private _app: JupyterFrontEnd;
   private _notebooks: INotebookTracker;
-  private _activeTab: 'xray' | 'target' | 'feature' | 'prep' | 'model-advisor' | 'lab' | 'inspector' | 'guide' = 'xray';
+  private _activeTab: 'xray' | 'target' | 'feature' | 'prep' | 'model-advisor' | 'lab' | 'guide' = 'xray';
   private _currentPath = '50_Startups.csv';
   private _resolvedDatasetPath = '';
   private _dataset: DatasetSummary | null = null;
   private _prepLevel: 'basic' | 'medium' | 'advanced' = 'basic';
+  private _trainerMode = false;
+  private _preprocessingRequestId = 0;
   private _targetCol = '';
   private _featureCol = '';
 
@@ -208,6 +227,7 @@ export class ModelMindStudioWidget extends Widget {
   private _root: HTMLDivElement;
   private _pathInput!: HTMLInputElement;
   private _statusPill!: HTMLDivElement;
+  private _notebookModeLabel!: HTMLDivElement;
   private _tabRow!: HTMLDivElement;
   private _tabButtons: Map<string, HTMLButtonElement> = new Map();
   private _contentArea!: HTMLDivElement;
@@ -216,6 +236,9 @@ export class ModelMindStudioWidget extends Widget {
     super();
     this._app = app;
     this._notebooks = notebooks;
+    this._trainerMode = getModelMindNotebookRole(
+      notebooks.currentWidget?.context.model
+    ) === 'trainer';
 
     this.id = 'modelmind-studio-sidebar';
     this.title.caption = 'ModelMind Studio';
@@ -230,6 +253,7 @@ export class ModelMindStudioWidget extends Widget {
     this._buildTabs();
     this._buildContentArea();
     this._bindNotebookTracker();
+    void this._refreshNotebookModeWhenReady();
 
     // Auto-load initial dataset if present
     setTimeout(() => {
@@ -253,6 +277,14 @@ export class ModelMindStudioWidget extends Widget {
         <div class="mm-studio-sub">AI ML Intelligence & Laboratory</div>
       </div>
     `;
+    this._notebookModeLabel = document.createElement('div');
+    this._notebookModeLabel.className = 'mm-studio-sub';
+    this._notebookModeLabel.textContent = this._trainerMode
+      ? 'Trainer Notebook · Preview only'
+      : 'ModelMind Notebook';
+    brand.querySelector('.mm-studio-title-box')?.appendChild(
+      this._notebookModeLabel
+    );
 
     // Dataset Path Row
     const pathWrap = document.createElement('div');
@@ -333,7 +365,6 @@ export class ModelMindStudioWidget extends Widget {
       { id: 'prep',         label: '🧠 Preprocessing' },
       { id: 'model-advisor', label: '🤖 Model Advisor' },
       { id: 'lab',          label: '⚗️ Model Lab' },
-      { id: 'inspector',    label: '⚠️ ML Inspector' },
       { id: 'guide',        label: '📖 Guide' },
     ];
 
@@ -363,6 +394,9 @@ export class ModelMindStudioWidget extends Widget {
   }
 
   private _bindNotebookTracker(): void {
+    this._notebooks.currentChanged.connect(() => {
+      void this._refreshNotebookModeWhenReady();
+    });
     this._notebooks.activeCellChanged.connect(() => {
       const cell = this._notebooks.activeCell;
       if (!cell || !isCodeCellModel(cell.model)) return;
@@ -376,6 +410,39 @@ export class ModelMindStudioWidget extends Widget {
         }
       }
     });
+  }
+
+  private async _refreshNotebookModeWhenReady(): Promise<void> {
+    const notebook = this._notebooks.currentWidget;
+    if (notebook) {
+      await notebook.context.ready;
+      if (notebook !== this._notebooks.currentWidget) {
+        return;
+      }
+    }
+    this.refreshNotebookMode();
+  }
+
+  refreshNotebookMode(): void {
+    const trainerMode =
+      getModelMindNotebookRole(this._notebooks.currentWidget?.context.model) ===
+      'trainer';
+    if (trainerMode === this._trainerMode) {
+      return;
+    }
+    this._trainerMode = trainerMode;
+    this._notebookModeLabel.textContent = trainerMode
+      ? 'Trainer Notebook · Preview only'
+      : 'ModelMind Notebook';
+    document.getElementById('mm-code-preview-modal')?.remove();
+    this._renderCurrentTab();
+  }
+
+  private _canUseCodeAction(action: NotebookCodeAction): boolean {
+    return canUseNotebookCodeAction(
+      this._trainerMode ? 'trainer' : 'modelmind',
+      action
+    );
   }
 
   private _autoDetectDataset(): void {
@@ -477,9 +544,6 @@ export class ModelMindStudioWidget extends Widget {
         break;
       case 'lab':
         this._renderModelLabTab();
-        break;
-      case 'inspector':
-        this._renderInspectorTab();
         break;
       case 'guide':
         this._renderGuideTab();
@@ -1038,9 +1102,9 @@ export class ModelMindStudioWidget extends Widget {
 
     // Level description banner
     const levelDescriptions: Record<string, string> = {
-      basic:    '🟢 Basic — Fill missing values with mean/mode. Perfect for beginners.',
-      medium:   '🟡 Medium — Fill NA + detect & cap outliers + encoding with pandas.',
-      advanced: '🔴 Advanced — Full sklearn Pipeline with ColumnTransformer, StandardScaler, OneHotEncoder & OrdinalEncoder.',
+      basic:    '🟢 Basic — Learn how simple mean, median, or mode filling works, and why the observed values support it.',
+      medium:   '🟡 Medium — Impute and inspect distribution / IQR flags; cap only after checking that flagged values are errors.',
+      advanced: '🔴 Advanced — Use leakage-safe sklearn Pipelines and ColumnTransformers fitted on training rows only.',
     };
 
     const lvlRow = document.createElement('div');
@@ -1048,16 +1112,12 @@ export class ModelMindStudioWidget extends Widget {
     lvlRow.id = 'mm-prep-level-row';
 
     const lbl = document.createElement('span');
-    lbl.style.cssText = 'font-size:11px; opacity:.7; margin-right:6px; font-weight:600;';
+    lbl.style.cssText = 'font-size:12px; opacity:.8; margin-right:8px; font-weight:700;';
     lbl.textContent = 'Skill Level:';
     lvlRow.appendChild(lbl);
 
     const levelDescBanner = document.createElement('div');
-    levelDescBanner.style.cssText = `
-      font-size:11px; padding:8px 12px; border-radius:8px; margin-bottom:10px; margin-top:6px;
-      background:rgba(167,139,250,0.08); border:1px solid rgba(167,139,250,0.2); color:#c4b5fd;
-      line-height:1.5;
-    `;
+    levelDescBanner.className = `mm-prep-level-banner mm-prep-level-${this._prepLevel}`;
     levelDescBanner.textContent = levelDescriptions[this._prepLevel];
 
     const updateLevelUI = () => {
@@ -1067,6 +1127,7 @@ export class ModelMindStudioWidget extends Widget {
         const isActive = btn.dataset['level'] === this._prepLevel;
         btn.className = `mm-level-pill${isActive ? ' active' : ''}`;
       });
+      levelDescBanner.className = `mm-prep-level-banner mm-prep-level-${this._prepLevel}`;
       levelDescBanner.textContent = levelDescriptions[this._prepLevel];
     };
 
@@ -1099,15 +1160,21 @@ export class ModelMindStudioWidget extends Widget {
   }
 
   private async _loadPreprocessingAdvice(container: HTMLElement): Promise<void> {
+    const requestId = ++this._preprocessingRequestId;
+    const level = this._prepLevel;
+    const datasetPath = this._pathInput.value.trim() || this._currentPath;
     container.innerHTML = '<div class="mm-studio-loading">Generating smart preprocessing recommendations...</div>';
 
     try {
-      const datasetPath = this._pathInput.value.trim() || this._currentPath;
       const res = await requestAPI<PreprocessingResult>('api/dataset/preprocessing', this._app.serviceManager.serverSettings, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ file_path: datasetPath, level: this._prepLevel })
+        body: JSON.stringify({ file_path: datasetPath, level })
       });
+
+      if (requestId !== this._preprocessingRequestId || !container.isConnected) {
+        return;
+      }
 
       this._resolvedDatasetPath = res.resolved_path || datasetPath;
       container.replaceChildren();
@@ -1131,25 +1198,30 @@ export class ModelMindStudioWidget extends Widget {
       });
 
       // ── Advanced: Show full pipeline suggestion banner ──
-      if (this._prepLevel === 'advanced' && res.pipeline_code) {
+      if (level === 'advanced' && res.pipeline_code) {
+        const fullPipelineCode = [
+          buildDatasetLoadingCode(this._resolvedDatasetPath),
+          '',
+          res.pipeline_code
+        ].join('\n');
         const pipelineSection = document.createElement('div');
         pipelineSection.style.cssText = `
           margin-top:18px; padding:16px; border-radius:12px;
-          background:rgba(99,102,241,0.07); border:1px solid rgba(99,102,241,0.25);
+          background:#f0fdf4; border:1px solid #bbf7d0;
         `;
         const pipelineTitle = document.createElement('div');
-        pipelineTitle.style.cssText = 'font-size:13px; font-weight:700; margin-bottom:4px; color:#4338ca;';
+        pipelineTitle.style.cssText = 'font-size:14px; font-weight:750; margin-bottom:6px; color:#15803d;';
         pipelineTitle.innerHTML = '🚀 Suggested Full ColumnTransformer Pipeline';
         const pipelineSub = document.createElement('div');
-        pipelineSub.style.cssText = 'font-size:11px; color:#5d6b80; margin-bottom:10px;';
+        pipelineSub.style.cssText = 'font-size:13px; line-height:1.55; color:#475569; margin-bottom:12px;';
         pipelineSub.textContent = 'This pipeline combines all numerical and categorical columns with proper imputation, scaling, and encoding.';
         const pipelineCode = document.createElement('pre');
         pipelineCode.style.cssText = `
           background:#ffffff; border:1px solid #dfe3ea; border-radius:8px;
-          padding:12px 14px; font-size:10.5px; overflow-x:auto; margin:0;
+          padding:14px 16px; font-size:12px; overflow-x:auto; margin:0;
           font-family:ui-monospace,SFMono-Regular,monospace; line-height:1.65; color:#1e293b;
         `;
-        pipelineCode.textContent = res.pipeline_code;
+        pipelineCode.textContent = fullPipelineCode;
         const pipelineBtnRow = document.createElement('div');
         pipelineBtnRow.style.cssText = 'display:flex; gap:8px; margin-top:10px;';
         const pipelineCopyBtn = document.createElement('button');
@@ -1157,7 +1229,7 @@ export class ModelMindStudioWidget extends Widget {
         pipelineCopyBtn.className = 'mm-studio-btn mm-btn-sm';
         pipelineCopyBtn.innerHTML = '📋 Copy Pipeline';
         pipelineCopyBtn.addEventListener('click', async () => {
-          await navigator.clipboard.writeText(res.pipeline_code!);
+          await navigator.clipboard.writeText(fullPipelineCode);
           pipelineCopyBtn.textContent = 'Copied!';
           setTimeout(() => { pipelineCopyBtn.innerHTML = '📋 Copy Pipeline'; }, 1500);
         });
@@ -1166,14 +1238,32 @@ export class ModelMindStudioWidget extends Widget {
         pipelineInsertBtn.className = 'mm-studio-btn mm-btn-sm mm-btn-primary';
         pipelineInsertBtn.innerHTML = '📥 Insert Pipeline';
         pipelineInsertBtn.addEventListener('click', () => {
-          const ok = this._insertPreprocessingCode(res.pipeline_code!);
+          const ok = this._insertPreprocessingCode(fullPipelineCode);
           this._showToast(ok ? '✓ Pipeline code inserted!' : 'Open a notebook first.');
         });
-        pipelineBtnRow.append(pipelineCopyBtn, pipelineInsertBtn);
+        if (!this._canUseCodeAction('insert')) {
+          const pipelinePreviewBtn = document.createElement('button');
+          pipelinePreviewBtn.type = 'button';
+          pipelinePreviewBtn.className = 'mm-studio-btn mm-btn-sm';
+          pipelinePreviewBtn.textContent = '🔍 Preview Code';
+          pipelinePreviewBtn.addEventListener('click', () => {
+            this._showCodePreviewModal(
+              'Full preprocessing pipeline',
+              fullPipelineCode,
+              'advanced'
+            );
+          });
+          pipelineBtnRow.append(pipelinePreviewBtn);
+        } else {
+          pipelineBtnRow.append(pipelineCopyBtn, pipelineInsertBtn);
+        }
         pipelineSection.append(pipelineTitle, pipelineSub, pipelineCode, pipelineBtnRow);
         container.appendChild(pipelineSection);
       }
     } catch (err) {
+      if (requestId !== this._preprocessingRequestId || !container.isConnected) {
+        return;
+      }
       container.innerHTML = `<div class="mm-studio-alert mm-alert-error">${err instanceof Error ? err.message : 'Failed to generate recommendations.'}</div>`;
     }
   }
@@ -1211,10 +1301,78 @@ export class ModelMindStudioWidget extends Widget {
     act.className = 'mm-prep-action';
     act.innerHTML = `<b>Recommended:</b> ${rec.recommended_action || rec.imputation_strategy}`;
 
+    if (rec.feature_type === 'numerical') {
+      const profile = document.createElement('div');
+      profile.className = 'mm-prep-profile';
+      const kind = rec.numeric_kind === 'discrete'
+        ? 'Discrete / count-like'
+        : rec.numeric_kind === 'continuous'
+          ? 'Continuous-like'
+          : 'Numeric type unknown';
+      const shape = (rec.distribution_shape || 'unknown')
+        .replace(/_/g, ' ');
+      const skew = typeof rec.skewness === 'number'
+        ? rec.skewness.toFixed(2)
+        : 'unavailable';
+      const outlierPct = typeof rec.outlier_percentage === 'number'
+        ? rec.outlier_percentage
+        : rec.outlier_pct;
+      profile.textContent =
+        `📊 Profile: ${kind} · ${shape} · skewness ${skew} · ` +
+        `IQR outliers ${rec.outlier_count ?? 0} (${outlierPct ?? 0}%)`;
+      if (
+        rec.transformation_strategy &&
+        rec.transformation_strategy !== 'none'
+      ) {
+        const transformNote = document.createElement('div');
+        transformNote.style.marginTop = '4px';
+        const transformName =
+          rec.transformation_strategy === 'log1p_candidate'
+            ? 'Log1p candidate'
+            : rec.transformation_strategy === 'power_transform_candidate'
+              ? 'Yeo-Johnson candidate'
+              : rec.transformation_strategy.replace(/_/g, ' ');
+        transformNote.textContent =
+          `Distribution option: ${transformName}. ` +
+          (rec.transformation_reason || 'Validate the transformed shape before using it.');
+        profile.appendChild(transformNote);
+      }
+      card.appendChild(profile);
+    }
+
     // Why & Risks
     const whyEl = document.createElement('div');
-    whyEl.className = 'mm-prep-text';
-    whyEl.innerHTML = `<b>Why:</b> ${rec.why || rec.explanation}`;
+    whyEl.className = 'mm-prep-why';
+    const whyLabel = document.createElement('b');
+    whyLabel.textContent = '✅ Why this choice: ';
+    whyEl.append(whyLabel, rec.why || rec.explanation);
+    if (rec.feature_type === 'numerical' && rec.imputation_reason) {
+      const reason = document.createElement('div');
+      reason.style.marginTop = '4px';
+      reason.textContent = `Imputation rationale: ${rec.imputation_reason}`;
+      whyEl.appendChild(reason);
+    }
+
+    const cautions = [
+      ...(Array.isArray(rec.warnings) ? rec.warnings : []),
+      ...(rec.risks ? [rec.risks] : [])
+    ].filter((item, index, all) =>
+      item && !/^no risks?\b/i.test(item.trim()) && all.indexOf(item) === index
+    );
+    const riskEl = cautions.length > 0 ? document.createElement('div') : null;
+    if (riskEl) {
+      riskEl.className = 'mm-prep-risk-box';
+      const riskHeading = document.createElement('strong');
+      riskHeading.textContent = '⚠️ Considerations';
+      const riskList = document.createElement('ul');
+      riskList.style.cssText = 'margin:6px 0 0;padding-left:20px;';
+      cautions.forEach(caution => {
+        const item = document.createElement('li');
+        item.textContent = caution;
+        riskList.appendChild(item);
+      });
+      riskEl.append(riskHeading, riskList);
+    }
 
     // Strategy selector
     const stratWrap = document.createElement('div');
@@ -1226,14 +1384,28 @@ export class ModelMindStudioWidget extends Widget {
     const strategies = rec.feature_type === 'numerical'
       ? ['mean', 'median', 'most_frequent', 'constant', 'standard_scaler', 'minmax_scaler', 'robust_scaler', 'cap_outliers_iqr', 'drop_column']
       : ['most_frequent', 'unknown', 'one_hot_encode', 'ordinal_encode', 'frequency_encode', 'drop_column'];
+    const defaultStrategy = strategies.includes(rec.imputation_strategy)
+      ? rec.imputation_strategy
+      : rec.feature_type === 'numerical'
+        ? 'median'
+        : strategies[0];
 
     strategies.forEach(s => {
       const opt = document.createElement('option');
       opt.value = s;
       opt.textContent = s.replace(/_/g, ' ').toUpperCase();
-      if (s === rec.imputation_strategy || s === 'median') opt.selected = true;
+      if (s === defaultStrategy) opt.selected = true;
       stratSelect.appendChild(opt);
     });
+    let strategyCustomized = false;
+    stratSelect.addEventListener('change', () => {
+      strategyCustomized = true;
+    });
+    const getCode = () => this._buildFullPreprocessingCode(
+      rec,
+      stratSelect.value,
+      strategyCustomized ? undefined : rec.example_code
+    );
 
     stratWrap.innerHTML = '<span style="font-size:10px; opacity:.7;">Strategy:</span>';
     stratWrap.appendChild(stratSelect);
@@ -1266,7 +1438,7 @@ export class ModelMindStudioWidget extends Widget {
             strategy: stratSelect.value
           })
         });
-        this._renderLivePreview(previewContainer, preview);
+        this._renderLivePreview(previewContainer, preview, rec, this._prepLevel);
         previewContainer.style.display = 'block';
       } catch (err) {
         previewContainer.innerHTML = `<div class="mm-studio-alert mm-alert-error">${err instanceof Error ? err.message : 'Preview failed.'}</div>`;
@@ -1337,10 +1509,7 @@ export class ModelMindStudioWidget extends Widget {
     insertBtn.innerHTML = '📥 Insert Code';
     insertBtn.title = 'Insert complete runnable preprocessing code, including loading the selected dataset';
     insertBtn.addEventListener('click', () => {
-      const code = this._buildFullPreprocessingCode(
-        rec,
-        stratSelect.value
-      );
+      const code = getCode();
       const ok = this._insertPreprocessingCode(code);
       if (ok) {
         this._showToast('✓ Full preprocessing code inserted below active cell!');
@@ -1357,10 +1526,7 @@ export class ModelMindStudioWidget extends Widget {
     copyBtn.addEventListener('click', async () => {
       try {
         await navigator.clipboard.writeText(
-          this._buildFullPreprocessingCode(
-            rec,
-            stratSelect.value
-          )
+          getCode()
         );
         copyBtn.textContent = 'Copied!';
         setTimeout(() => { copyBtn.innerHTML = '📋 Copy'; }, 1500);
@@ -1378,27 +1544,39 @@ export class ModelMindStudioWidget extends Widget {
     previewCodeBtn.addEventListener('click', () => {
       this._showCodePreviewModal(
         rec.feature,
-        this._buildFullPreprocessingCode(
-          rec,
-          stratSelect.value
-        ),
+        getCode(),
         this._prepLevel
       );
     });
 
-    toolRow.append(prevBtn, applyBtn, undoBtn, insertBtn, copyBtn, previewCodeBtn);
+    toolRow.append(prevBtn, applyBtn, undoBtn);
+    if (this._canUseCodeAction('insert')) {
+      toolRow.append(insertBtn, copyBtn);
+    }
+    toolRow.append(previewCodeBtn);
 
-    card.append(hdr, act, whyEl, stratWrap, previewContainer, toolRow);
+    card.append(hdr, act);
+    const profileEl = card.querySelector('.mm-prep-profile');
+    if (profileEl) card.appendChild(profileEl);
+    card.appendChild(whyEl);
+    if (riskEl) card.appendChild(riskEl);
+    card.append(stratWrap, previewContainer, toolRow);
     return card;
   }
 
   private _buildFullPreprocessingCode(
     rec: PreprocessingRec,
-    selectedStrategy: string
+    selectedStrategy: string,
+    recommendedCode?: string
   ): string {
     const selectedPath =
       this._resolvedDatasetPath || this._pathInput.value.trim() || this._currentPath;
-    return buildFullPreprocessingCode(selectedPath, rec, selectedStrategy);
+    return buildFullPreprocessingCode(
+      selectedPath,
+      rec,
+      selectedStrategy,
+      recommendedCode
+    );
   }
 
   // ── Code Preview Modal ────────────────────────────────────────────────────
@@ -1518,7 +1696,10 @@ export class ModelMindStudioWidget extends Widget {
     ftrClose.innerHTML = 'Close';
     ftrClose.addEventListener('click', () => overlay.remove());
 
-    modalFtr.append(ftrCopy, ftrInsert, ftrClose);
+    if (this._canUseCodeAction('copy')) {
+      modalFtr.append(ftrCopy, ftrInsert);
+    }
+    modalFtr.append(ftrClose);
     modal.append(modalHdr, codeBody, modalFtr);
     overlay.appendChild(modal);
 
@@ -1530,17 +1711,24 @@ export class ModelMindStudioWidget extends Widget {
     document.body.appendChild(overlay);
   }
 
-  private _renderLivePreview(container: HTMLElement, preview: PreviewResult): void {
+  private _renderLivePreview(
+    container: HTMLElement,
+    preview: PreviewResult,
+    recommendation: PreprocessingRec,
+    level: 'basic' | 'medium' | 'advanced'
+  ): void {
     container.replaceChildren();
 
     const title = document.createElement('div');
-    title.style.cssText = 'font-weight:700; font-size:11px; margin-bottom:8px; color:#818cf8;';
-    title.innerHTML = `👁️ Live Preview: Strategy <code>${preview.strategy}</code> on <code>${preview.feature}</code>`;
+    title.style.cssText = 'font-weight:750; font-size:14px; margin-bottom:12px; color:#166534;';
+    title.textContent = `👁️ Live Preview: ${preview.strategy.replace(/_/g, ' ')} on ${preview.feature}`;
 
-    const beforeMiss = (preview.before as any).statistics?.missing_count ?? preview.before.missing_count ?? 0;
-    const afterMiss = (preview.after as any).statistics?.missing_count ?? preview.after.missing_count ?? 0;
-    const beforeMean = (preview.before as any).statistics?.mean ?? preview.before.mean;
-    const afterMean = (preview.after as any).statistics?.mean ?? preview.after.mean;
+    const beforeStats = preview.before.statistics;
+    const afterStats = preview.after.statistics;
+    const beforeMiss = beforeStats?.missing_count ?? preview.before.missing_count ?? 0;
+    const afterMiss = afterStats?.missing_count ?? preview.after.missing_count ?? 0;
+    const beforeMean = beforeStats?.mean ?? preview.before.mean;
+    const afterMean = afterStats?.mean ?? preview.after.mean;
     const beforeSample = (preview.before as any).sample || preview.before.sample_values || [];
     const afterSample = (preview.after as any).sample || preview.after.sample_values || [];
 
@@ -1567,26 +1755,267 @@ export class ModelMindStudioWidget extends Widget {
           <div class="mm-stat-lbl">Mean After</div>
         </div>
       ` : ''}
+      ${beforeStats?.skewness !== undefined ? `
+        <div class="mm-stat-box">
+          <div class="mm-stat-val">${beforeStats.skewness === null ? '—' : beforeStats.skewness.toFixed(2)}</div>
+          <div class="mm-stat-lbl">Skewness Before</div>
+        </div>
+      ` : ''}
+      ${afterStats?.skewness !== undefined ? `
+        <div class="mm-stat-box">
+          <div class="mm-stat-val">${afterStats.skewness === null ? '—' : afterStats.skewness.toFixed(2)}</div>
+          <div class="mm-stat-lbl">Skewness After</div>
+        </div>
+      ` : ''}
     `;
+
+    if (beforeStats?.category_distribution && afterStats?.category_distribution) {
+      const beforeDistribution = beforeStats.category_distribution;
+      const afterDistribution = afterStats.category_distribution;
+      const categories = beforeDistribution.categories;
+      const chartTitle = document.createElement('div');
+      chartTitle.style.cssText = 'font-size:13px;font-weight:750;margin:14px 0 7px;color:#173b2b;';
+      chartTitle.textContent = 'Categorical histogram — frequency before vs after';
+
+      const rowHeight = 32;
+      const chartHeight = Math.max(130, 38 + categories.length * rowHeight);
+      const chart = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      chart.setAttribute('viewBox', `0 0 360 ${chartHeight}`);
+      chart.setAttribute('role', 'img');
+      chart.setAttribute('aria-label', `Categorical histogram for ${preview.feature} before and after ${preview.strategy} imputation`);
+      chart.style.cssText = 'width:100%;height:auto;max-height:260px;background:#fff;border:1px solid #e2e8f0;border-radius:8px;';
+      const addSvg = (name: string, attrs: Record<string, string>, text?: string) => {
+        const element = document.createElementNS('http://www.w3.org/2000/svg', name);
+        Object.entries(attrs).forEach(([key, value]) => element.setAttribute(key, value));
+        if (text) element.textContent = text;
+        chart.appendChild(element);
+        return element;
+      };
+      addSvg('rect', { x: '126', y: '9', width: '9', height: '9', rx: '2', fill: '#6366f1' });
+      addSvg('text', { x: '140', y: '17', fill: '#475569', 'font-size': '10' }, `Before (n=${beforeDistribution.sample_count})`);
+      addSvg('rect', { x: '244', y: '9', width: '9', height: '9', rx: '2', fill: '#10b981' });
+      addSvg('text', { x: '258', y: '17', fill: '#475569', 'font-size': '10' }, `After (n=${afterDistribution.sample_count})`);
+
+      const maxPercentage = Math.max(1, ...beforeDistribution.percentages, ...afterDistribution.percentages);
+      const barStart = 128;
+      const barMaxWidth = 164;
+      const label = (value: string) => value.length > 17 ? `${value.slice(0, 16)}…` : value;
+      categories.forEach((category, index) => {
+        const y = 27 + index * rowHeight;
+        addSvg('text', { x: '8', y: String(y + 15), fill: '#334155', 'font-size': '10' }, label(category));
+        addSvg('rect', { x: String(barStart), y: String(y + 1), width: String(barMaxWidth), height: '8', rx: '3', fill: '#eef2ff' });
+        addSvg('rect', { x: String(barStart), y: String(y + 12), width: String(barMaxWidth), height: '8', rx: '3', fill: '#ecfdf5' });
+        const beforeWidth = beforeDistribution.percentages[index] / maxPercentage * barMaxWidth;
+        const afterWidth = afterDistribution.percentages[index] / maxPercentage * barMaxWidth;
+        const beforeBar = addSvg('rect', { x: String(barStart), y: String(y + 1), width: beforeWidth.toFixed(2), height: '8', rx: '3', fill: '#6366f1' });
+        beforeBar.appendChild(document.createElementNS('http://www.w3.org/2000/svg', 'title')).textContent =
+          `Before · ${beforeDistribution.counts[index]} rows (${beforeDistribution.percentages[index]}%)`;
+        const afterBar = addSvg('rect', { x: String(barStart), y: String(y + 12), width: afterWidth.toFixed(2), height: '8', rx: '3', fill: '#10b981' });
+        afterBar.appendChild(document.createElementNS('http://www.w3.org/2000/svg', 'title')).textContent =
+          `After · ${afterDistribution.counts[index]} rows (${afterDistribution.percentages[index]}%)`;
+        addSvg('text', { x: String(barStart + barMaxWidth + 5), y: String(y + 8), fill: '#64748b', 'font-size': '9' }, `${beforeDistribution.percentages[index].toFixed(1)}%`);
+        addSvg('text', { x: String(barStart + barMaxWidth + 5), y: String(y + 19), fill: '#64748b', 'font-size': '9' }, `${afterDistribution.percentages[index].toFixed(1)}%`);
+      });
+
+      const chartNote = document.createElement('div');
+      chartNote.className = 'mm-prep-preview-note';
+      chartNote.textContent = categories.includes('Other (remaining)')
+        ? 'Bars compare category percentages on a shared scale. The eight most common categories are shown; the remaining categories are grouped as Other.'
+        : 'Bars compare category percentages on a shared scale. Percentages use each side’s non-missing row count.';
+
+      const whyBox = document.createElement('div');
+      whyBox.className = 'mm-prep-preview-rationale';
+      const whyHeading = document.createElement('strong');
+      whyHeading.textContent = `✅ Why this ${level} choice? `;
+      const whyText = document.createElement('span');
+      whyText.textContent = recommendation.why || recommendation.explanation;
+      whyBox.append(whyHeading, whyText);
+      if (recommendation.imputation_reason) {
+        const methodReason = document.createElement('div');
+        methodReason.style.cssText = 'margin-top:7px;';
+        methodReason.textContent = `Method rationale: ${recommendation.imputation_reason}`;
+        whyBox.appendChild(methodReason);
+      }
+      const previewExplanation = document.createElement('div');
+      previewExplanation.className = 'mm-prep-preview-note';
+      previewExplanation.textContent = preview.details || (preview as any).explanation || '';
+      container.append(title, grid, chartTitle, chart, chartNote, whyBox, previewExplanation);
+    } else if (beforeStats?.pdf && afterStats?.pdf) {
+      const chartTitle = document.createElement('div');
+      chartTitle.style.cssText = 'font-size:13px;font-weight:750;margin:14px 0 7px;color:#173b2b;';
+      chartTitle.textContent = 'PDF — empirical probability density (shared bins)';
+      const chart = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      chart.setAttribute('viewBox', '0 0 360 176');
+      chart.setAttribute('role', 'img');
+      chart.setAttribute('aria-label', `Probability density plot for ${preview.feature} before and after ${preview.strategy} imputation`);
+      chart.style.cssText = 'width:100%;height:auto;max-height:190px;background:#fff;border:1px solid #e2e8f0;border-radius:8px;';
+
+      const edges = beforeStats.pdf.edges;
+      const beforeDensity = beforeStats.pdf.density;
+      const afterDensity = afterStats.pdf.density;
+      const binCount = Math.min(beforeDensity.length, afterDensity.length, Math.max(0, edges.length - 1));
+      const maxDensity = Math.max(0, ...beforeDensity.slice(0, binCount), ...afterDensity.slice(0, binCount));
+      const left = 42, right = 8, top = 24, plotHeight = 112;
+      const plotWidth = 360 - left - right;
+
+      const addSvg = (name: string, attrs: Record<string, string>, text?: string) => {
+        const element = document.createElementNS('http://www.w3.org/2000/svg', name);
+        Object.entries(attrs).forEach(([key, value]) => element.setAttribute(key, value));
+        if (text) element.textContent = text;
+        chart.appendChild(element);
+        return element;
+      };
+
+      addSvg('line', { x1: String(left), y1: String(top + plotHeight), x2: String(360 - right), y2: String(top + plotHeight), stroke: '#94a3b8', 'stroke-width': '1' });
+      addSvg('line', { x1: String(left), y1: String(top), x2: String(left), y2: String(top + plotHeight), stroke: '#94a3b8', 'stroke-width': '1' });
+
+      if (maxDensity > 0 && binCount > 0) {
+        const groupWidth = plotWidth / binCount;
+        const barWidth = Math.max(2, groupWidth * 0.39);
+        for (let index = 0; index < binCount; index += 1) {
+          const x = left + index * groupWidth + groupWidth * 0.08;
+          const beforeHeight = beforeDensity[index] / maxDensity * plotHeight;
+          const afterHeight = afterDensity[index] / maxDensity * plotHeight;
+          const beforeRect = addSvg('rect', {
+            x: x.toFixed(2), y: (top + plotHeight - beforeHeight).toFixed(2),
+            width: barWidth.toFixed(2), height: Math.max(0.5, beforeHeight).toFixed(2),
+            rx: '1', fill: '#6366f1', opacity: '0.78'
+          });
+          beforeRect.appendChild(document.createElementNS('http://www.w3.org/2000/svg', 'title')).textContent =
+            `Before · ${beforeStats.pdf.counts[index]} rows · density ${beforeDensity[index]}`;
+          const afterRect = addSvg('rect', {
+            x: (x + barWidth + groupWidth * 0.06).toFixed(2), y: (top + plotHeight - afterHeight).toFixed(2),
+            width: barWidth.toFixed(2), height: Math.max(0.5, afterHeight).toFixed(2),
+            rx: '1', fill: '#10b981', opacity: '0.78'
+          });
+          afterRect.appendChild(document.createElementNS('http://www.w3.org/2000/svg', 'title')).textContent =
+            `After · ${afterStats.pdf.counts[index]} rows · density ${afterDensity[index]}`;
+        }
+      }
+
+      addSvg('rect', { x: '48', y: '7', width: '9', height: '9', rx: '2', fill: '#6366f1' });
+      addSvg('text', { x: '61', y: '15', fill: '#475569', 'font-size': '9' }, `Before (n=${beforeStats.pdf.sample_count})`);
+      addSvg('rect', { x: '166', y: '7', width: '9', height: '9', rx: '2', fill: '#10b981' });
+      addSvg('text', { x: '179', y: '15', fill: '#475569', 'font-size': '9' }, `After (n=${afterStats.pdf.sample_count})`);
+      addSvg('text', { x: String(left), y: '169', fill: '#64748b', 'font-size': '9' }, String(edges[0]));
+      addSvg('text', { x: String(360 - right), y: '169', fill: '#64748b', 'font-size': '9', 'text-anchor': 'end' }, String(edges[edges.length - 1]));
+
+      const chartNote = document.createElement('div');
+      chartNote.className = 'mm-prep-preview-note';
+      chartNote.textContent = 'This empirical PDF is a density-normalized histogram: bar area represents probability, and total area is approximately 1.';
+
+      let kdeTitle: HTMLDivElement | null = null;
+      let kdeChart: SVGSVGElement | null = null;
+      let kdeNote: HTMLDivElement | null = null;
+      if (recommendation.numeric_kind === 'discrete') {
+        kdeNote = document.createElement('div');
+        kdeNote.className = 'mm-prep-preview-note';
+        kdeNote.textContent = 'KDE is omitted because this is a discrete/count-like feature; smoothing it would imply values between valid counts. The PDF above shows its empirical distribution.';
+      } else if (beforeStats.kde && afterStats.kde) {
+        kdeTitle = document.createElement('div');
+        kdeTitle.style.cssText = 'font-size:13px;font-weight:750;margin:14px 0 7px;color:#173b2b;';
+        kdeTitle.textContent = 'KDE — smoothed density estimate (before vs after)';
+        kdeChart = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        kdeChart.setAttribute('viewBox', '0 0 360 176');
+        kdeChart.setAttribute('role', 'img');
+        kdeChart.setAttribute('aria-label', `Gaussian KDE plot for ${preview.feature} before and after ${preview.strategy} imputation`);
+        kdeChart.style.cssText = 'width:100%;height:auto;max-height:190px;background:#fff;border:1px solid #e2e8f0;border-radius:8px;';
+        const kdeX = beforeStats.kde.x;
+        const beforeKde = beforeStats.kde.density;
+        const afterKde = afterStats.kde.density;
+        const pointCount = Math.min(kdeX.length, beforeKde.length, afterKde.length);
+        const maxKde = Math.max(0, ...beforeKde.slice(0, pointCount), ...afterKde.slice(0, pointCount));
+        const kdeLeft = 42, kdeRight = 8, kdeTop = 24, kdeHeight = 112;
+        const kdeWidth = 360 - kdeLeft - kdeRight;
+        const addKdeSvg = (name: string, attrs: Record<string, string>, text?: string) => {
+          const element = document.createElementNS('http://www.w3.org/2000/svg', name);
+          Object.entries(attrs).forEach(([key, value]) => element.setAttribute(key, value));
+          if (text) element.textContent = text;
+          kdeChart?.appendChild(element);
+          return element;
+        };
+        addKdeSvg('line', { x1: String(kdeLeft), y1: String(kdeTop + kdeHeight), x2: String(360 - kdeRight), y2: String(kdeTop + kdeHeight), stroke: '#94a3b8', 'stroke-width': '1' });
+        addKdeSvg('line', { x1: String(kdeLeft), y1: String(kdeTop), x2: String(kdeLeft), y2: String(kdeTop + kdeHeight), stroke: '#94a3b8', 'stroke-width': '1' });
+        if (maxKde > 0 && pointCount > 1) {
+          const makePath = (density: number[]) => density.slice(0, pointCount).map((value, index) => {
+            const x = kdeLeft + (index / (pointCount - 1)) * kdeWidth;
+            const y = kdeTop + kdeHeight - (value / maxKde) * kdeHeight;
+            return `${index === 0 ? 'M' : 'L'}${x.toFixed(2)},${y.toFixed(2)}`;
+          }).join(' ');
+          addKdeSvg('path', { d: makePath(beforeKde), fill: 'none', stroke: '#6366f1', 'stroke-width': '2.5', 'stroke-linejoin': 'round', 'stroke-linecap': 'round' });
+          addKdeSvg('path', { d: makePath(afterKde), fill: 'none', stroke: '#10b981', 'stroke-width': '2.5', 'stroke-linejoin': 'round', 'stroke-linecap': 'round' });
+        }
+        addKdeSvg('line', { x1: '48', y1: '12', x2: '58', y2: '12', stroke: '#6366f1', 'stroke-width': '3' });
+        addKdeSvg('text', { x: '62', y: '15', fill: '#475569', 'font-size': '9' }, `Before (n=${beforeStats.kde.sample_count})`);
+        addKdeSvg('line', { x1: '166', y1: '12', x2: '176', y2: '12', stroke: '#10b981', 'stroke-width': '3' });
+        addKdeSvg('text', { x: '180', y: '15', fill: '#475569', 'font-size': '9' }, `After (n=${afterStats.kde.sample_count})`);
+        addKdeSvg('text', { x: String(kdeLeft), y: '169', fill: '#64748b', 'font-size': '9' }, String(kdeX[0]));
+        addKdeSvg('text', { x: String(360 - kdeRight), y: '169', fill: '#64748b', 'font-size': '9', 'text-anchor': 'end' }, String(kdeX[pointCount - 1]));
+        kdeNote = document.createElement('div');
+        kdeNote.className = 'mm-prep-preview-note';
+        kdeNote.textContent = `Gaussian KDE with shared bandwidth ${beforeStats.kde.bandwidth ?? '—'}; this is a smoothed estimate, while the PDF above shows binned empirical density.`;
+      }
+
+      const whyBox = document.createElement('div');
+      whyBox.className = 'mm-prep-preview-rationale';
+      const whyHeading = document.createElement('strong');
+      whyHeading.textContent = `✅ Why this ${level} choice? `;
+      const whyText = document.createElement('span');
+      whyText.textContent = recommendation.why || recommendation.explanation;
+      whyBox.append(whyHeading, whyText);
+      if (recommendation.imputation_reason) {
+        const methodReason = document.createElement('div');
+        methodReason.style.cssText = 'margin-top:7px;';
+        methodReason.textContent = `Method rationale: ${recommendation.imputation_reason}`;
+        whyBox.appendChild(methodReason);
+      }
+      const previewExplanation = document.createElement('div');
+      previewExplanation.className = 'mm-prep-preview-note';
+      previewExplanation.textContent = preview.details || (preview as any).explanation || '';
+
+      container.append(title, grid, chartTitle, chart, chartNote);
+      if (kdeTitle && kdeChart && kdeNote) container.append(kdeTitle, kdeChart, kdeNote);
+      else if (kdeNote) container.append(kdeNote);
+      container.append(whyBox, previewExplanation);
+    }
 
     // Sample Values Comparison
     const sampleBox = document.createElement('div');
     sampleBox.className = 'mm-prep-sample-box';
-    sampleBox.innerHTML = `
-      <div style="font-size:10px; font-weight:600; margin-bottom:4px; opacity:.8;">Sample Values (Before vs After):</div>
-      <div style="display:flex; gap:10px; font-family:monospace; font-size:10px;">
-        <div style="flex:1;">
-          <div style="opacity:.6; margin-bottom:2px;">Before:</div>
-          <div style="color:#fca5a5;">${beforeSample.slice(0, 5).map((v: any) => v === null ? 'NaN' : typeof v === 'number' ? v.toFixed(1) : v).join(', ')}</div>
-        </div>
-        <div style="flex:1;">
-          <div style="opacity:.6; margin-bottom:2px;">After:</div>
-          <div style="color:#86efac;">${afterSample.slice(0, 5).map((v: any) => v === null ? 'NaN' : typeof v === 'number' ? v.toFixed(1) : v).join(', ')}</div>
-        </div>
-      </div>
-    `;
+    const sampleTitle = document.createElement('div');
+    sampleTitle.style.cssText = 'font-size:10px;font-weight:600;margin-bottom:4px;opacity:.8;';
+    sampleTitle.textContent = 'Sample values (before vs after):';
+    const sampleColumns = document.createElement('div');
+    sampleColumns.style.cssText = 'display:flex;gap:10px;font-family:monospace;font-size:10px;';
+    const beforeColumn = document.createElement('div');
+    beforeColumn.style.flex = '1';
+    const beforeLabel = document.createElement('div');
+    beforeLabel.style.cssText = 'opacity:.6;margin-bottom:2px;';
+    beforeLabel.textContent = 'Before:';
+    const beforeValues = document.createElement('div');
+    beforeValues.style.color = '#dc2626';
+    beforeValues.textContent = beforeSample.slice(0, 5).map((v: any) => v === null ? 'NaN' : typeof v === 'number' ? v.toFixed(1) : String(v)).join(', ');
+    beforeColumn.append(beforeLabel, beforeValues);
+    const afterColumn = document.createElement('div');
+    afterColumn.style.flex = '1';
+    const afterLabel = document.createElement('div');
+    afterLabel.style.cssText = 'opacity:.6;margin-bottom:2px;';
+    afterLabel.textContent = 'After:';
+    const afterValues = document.createElement('div');
+    afterValues.style.color = '#059669';
+    afterValues.textContent = afterSample.slice(0, 5).map((v: any) => v === null ? 'NaN' : typeof v === 'number' ? v.toFixed(1) : String(v)).join(', ');
+    afterColumn.append(afterLabel, afterValues);
+    sampleColumns.append(beforeColumn, afterColumn);
+    sampleBox.append(sampleTitle, sampleColumns);
 
-    container.append(title, grid, sampleBox);
+    if (!(beforeStats?.pdf && afterStats?.pdf)) {
+      const reason = document.createElement('div');
+      reason.className = 'mm-prep-text';
+      reason.textContent = recommendation.why || recommendation.explanation;
+      container.append(title, grid, reason, sampleBox);
+    } else {
+      container.appendChild(sampleBox);
+    }
   }
 
   // ═════════════════════════════════════════════════════════════════
@@ -2185,47 +2614,52 @@ export class ModelMindStudioWidget extends Widget {
             }
 
             const models = automl.recommendations.map(
-              (item: any, index: number) => ({
-                name: item.name,
-                rank: index + 1,
-                medal: index === 0 ? '🥇' :
-                  index === 1 ? '🥈' :
-                  index === 2 ? '🥉' : '🏅',
-                score: 0,
-                tags: [
-                  'Measured CV',
-                  automl.task === 'regression'
-                    ? 'Regression'
-                    : 'Classification'
-                ],
-                why:
-                  'Selected using measured cross-validation ' +
-                  'performance among the evaluated finalists. ' +
-                  'The score is an estimate, not a guarantee ' +
-                  'of performance on new data.',
-                strengths: [
-                  'Evaluated on the selected dataset',
-                  'Preprocessing fitted within CV folds'
-                ],
-                weaknesses: [
-                  'Performance depends on the dataset',
-                  'Final holdout performance may differ'
-                ],
-                best_for:
-                  'Datasets where this algorithm performs well ' +
-                  'under the selected evaluation procedure.',
-                training_speed: 'Dataset dependent',
-                complexity: 'Model dependent',
-                interpretability: 'Model dependent',
-                code: item.code_available ? item.code : '',
-                defaultCode: item.code_available ? item.code : '',
-                automl_measured: true,
-                measured_score: item.measured_score,
-                measured_std: item.std_score,
-                automl_task: automl.task,
-                code_available: item.code_available,
-                code_error: item.code_error
-              })
+              (item: any, index: number) => {
+                const rank = Number.isInteger(item.rank)
+                  ? item.rank
+                  : index + 1;
+                const explanation = buildMeasuredModelExplanation({
+                  name: String(item.name),
+                  task: automl.task,
+                  metric: String(item.metric ?? automl.metric ?? 'CV score'),
+                  score: item.measured_score,
+                  scoreStd: item.std_score,
+                  rank,
+                  finalistCount: automl.recommendations.length,
+                  candidateCount: automl.candidate_count,
+                  cvFolds: item.cv_folds ?? automl.cv_folds
+                });
+
+                return {
+                  name: item.name,
+                  rank,
+                  medal: rank === 1 ? '🥇' :
+                    rank === 2 ? '🥈' :
+                    rank === 3 ? '🥉' : '🏅',
+                  score: 0,
+                  tags: [
+                    'Measured CV',
+                    automl.task === 'regression'
+                      ? 'Regression'
+                      : 'Classification'
+                  ],
+                  why: explanation.why,
+                  strengths: explanation.strengths,
+                  weaknesses: explanation.weaknesses,
+                  best_for: explanation.bestFor,
+                  training_speed: explanation.trainingSpeed,
+                  complexity: explanation.complexity,
+                  interpretability: explanation.interpretability,
+                  code: item.code_available ? item.code : '',
+                  defaultCode: item.code_available ? item.code : '',
+                  automl_measured: true,
+                  measured_score: item.measured_score,
+                  measured_std: item.std_score,
+                  automl_task: automl.task,
+                  code_available: item.code_available,
+                  code_error: item.code_error
+                };
+              }
             );
 
             const rendered = {
@@ -2533,11 +2967,19 @@ export class ModelMindStudioWidget extends Widget {
         'confirm a final model on a separate test set before deployment.';
       output.appendChild(note);
 
-      const ranking = Array.isArray(result?.results)
+      const results = Array.isArray(result?.results)
         ? result.results
-        : Array.isArray(result?.ranking)
-          ? result.ranking
-          : [];
+        : [];
+      const rankedResults = Array.isArray(result?.ranking)
+        ? result.ranking
+        : results;
+      const rankedNames = new Set(
+        rankedResults.map((item: any) => item?.model)
+      );
+      const ranking = [
+        ...rankedResults,
+        ...results.filter((item: any) => !rankedNames.has(item?.model))
+      ];
 
       if (!ranking.length) {
         const message = document.createElement('pre');
@@ -2637,6 +3079,13 @@ export class ModelMindStudioWidget extends Widget {
                 `${formatValue(rec.default)} → ` +
                 `${formatValue(rec.recommended)}`;
               parameterText.appendChild(row);
+              const reason = document.createElement('div');
+              reason.style.cssText =
+                'font-size:10px;color:#64748b;margin:0 0 4px 8px;';
+              reason.textContent = explainTuningParameter(
+                String(rec.parameter)
+              );
+              parameterText.appendChild(reason);
             });
           } else {
             Object.entries(params).forEach(([key, value]) => {
@@ -2653,8 +3102,9 @@ export class ModelMindStudioWidget extends Widget {
 
           if (state === 'partial_defaults_recommended') {
             parameterText.textContent =
-              'Default parameters performed best so far. ' +
-              'Search incomplete — more configurations remain untested.';
+              'Defaults are the best-supported choice so far. ' +
+              'The baseline settings are kept; the search is incomplete, ' +
+              'so untested configurations could differ.';
           } else if (state === 'insufficient_validation') {
             parameterText.textContent =
               'No parameter changes recommended: the evaluation had fewer ' +
@@ -2665,8 +3115,9 @@ export class ModelMindStudioWidget extends Widget {
               'Promising changes found, but the search is incomplete.';
           } else if (state === 'defaults_recommended') {
             parameterText.textContent =
-              'Keep default parameters. Tested alternatives ' +
-              'did not provide a meaningful improvement.';
+              'Default parameters are the best-supported choice: no tested ' +
+              'alternative beat the baseline by a meaningful, consistent ' +
+              'margin on the same CV folds.';
           } else if (state === 'baseline_unavailable') {
             parameterText.textContent =
               'The default baseline was unavailable. ' +
@@ -2695,10 +3146,31 @@ export class ModelMindStudioWidget extends Widget {
           const comparison = document.createElement('div');
           comparison.style.cssText =
             'font-size:10px;color:#64748b;margin-top:6px;';
+          const selectedScore = item?.best_score;
+          const selectedText =
+            typeof selectedScore === 'number' &&
+            Number.isFinite(selectedScore)
+              ? ` • Recommended CV: ${formattedScore(item)}`
+              : '';
           comparison.textContent =
-            `Default CV: ${baseline.toFixed(4)} • ` +
-            `Best tested CV: ${bestTested.toFixed(4)}`;
+            `Default CV: ${formattedScore({ best_score: baseline })} • ` +
+            `Best tested CV: ${formattedScore({ best_score: bestTested })}` +
+            selectedText;
           parameterText.appendChild(comparison);
+
+          const improvement = item?.improvement_over_default;
+          if (
+            typeof improvement === 'number' &&
+            Number.isFinite(improvement)
+          ) {
+            const gain = document.createElement('div');
+            gain.style.cssText =
+              'font-size:10px;color:#475569;margin-top:4px;';
+            gain.textContent = task === 'classification'
+              ? `Best tested change vs. default: ${(improvement * 100).toFixed(2)} percentage points in ${String(result?.metric ?? 'CV score')}.`
+              : `Best tested RMSE change vs. default: ${improvement.toFixed(4)} lower is better.`;
+            parameterText.appendChild(gain);
+          }
         }
 
         const testedCount = item?.configurations_tested;
@@ -2726,25 +3198,67 @@ export class ModelMindStudioWidget extends Widget {
           parameterText.appendChild(warning);
         }
 
+        const recommendationReason = document.createElement('div');
+        recommendationReason.style.cssText =
+          'font-size:10.5px;color:#334155;margin-top:7px;line-height:1.5;';
+        const recommendationStatus = String(
+          item?.recommendation_status ?? ''
+        );
+        if (
+          recommendationStatus === 'parameter_changes_recommended' ||
+          recommendationStatus === 'partial_parameter_changes'
+        ) {
+          recommendationReason.textContent =
+            'Why these settings: this tested configuration was better than the default on the same CV folds and cleared the practical-gain and fold-consistency checks.' +
+            (item?.completed === false
+              ? ' The search is incomplete, so treat this as provisional.'
+              : '');
+        } else if (
+          recommendationStatus === 'defaults_recommended' ||
+          recommendationStatus === 'partial_defaults_recommended'
+        ) {
+          recommendationReason.textContent =
+            'Why keep defaults: the baseline is the best-supported configuration. No tested alternative showed a sufficiently large, consistent improvement across the same CV folds.' +
+            (item?.completed === false
+              ? ' The search is incomplete; untested settings may differ.'
+              : '');
+        } else if (recommendationStatus === 'insufficient_validation') {
+          recommendationReason.textContent =
+            'Why no tuning change: too few CV folds were available to distinguish a real gain from fold-to-fold variation.';
+        } else if (recommendationStatus === 'baseline_unavailable') {
+          recommendationReason.textContent =
+            'Why no tuning change: without a valid default baseline, a fair parameter comparison is not possible.';
+        }
+        if (recommendationReason.textContent) {
+          parameterText.appendChild(recommendationReason);
+        }
+
         if (typeof item?.code === 'string' && item.code.trim()) {
           const tunedCode = item.code;
+          const hasRecommendedChanges = Object.keys(params).length > 0;
           const codeNotice = document.createElement('div');
           codeNotice.style.cssText =
             'font-size:10.5px;color:#047857;margin-top:6px;font-weight:600;display:flex;align-items:center;gap:4px;';
-          codeNotice.innerHTML = '<span>⚡ Tuned! Recommendations shown on Model Advisor card above. The main insert button still inserts <b>baseline code</b> — apply changes manually.</span>';
+          codeNotice.textContent = hasRecommendedChanges
+            ? 'CV-selected parameter values are applied in this code. The Model Advisor card keeps its baseline code separately.'
+            : 'Defaults are the best-supported choice. This inserts the same default estimator settings as the baseline code; no parameter change passed the CV checks.';
           parameterText.appendChild(codeNotice);
 
           const actionRow = document.createElement('div');
-          actionRow.style.cssText = 'display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;';
+          actionRow.style.cssText =
+            'display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;';
 
           const insertTunedBtn = document.createElement('button');
           insertTunedBtn.type = 'button';
           insertTunedBtn.className = 'mm-studio-btn mm-btn-sm mm-btn-primary';
           insertTunedBtn.style.cssText = 'background:#059669;border-color:#047857;color:#fff;font-weight:600;';
-          insertTunedBtn.innerHTML = '📥 Insert Tuned Code into Notebook';
+          insertTunedBtn.textContent =
+            hasRecommendedChanges
+              ? '📥 Insert CV-Selected Code'
+              : '📥 Insert Default Code';
           insertTunedBtn.addEventListener('click', () => {
             const ok = this._insertCodeBelow(tunedCode);
-            this._showToast(ok ? `✓ Tuned ${modelName} code inserted into notebook!` : 'Open a notebook first.');
+            this._showToast(ok ? `✓ CV-selected ${modelName} code inserted into notebook!` : 'Open a notebook first.');
           });
 
           const copyTunedBtn = document.createElement('button');
@@ -2765,7 +3279,11 @@ export class ModelMindStudioWidget extends Widget {
             this._showCodePreviewModal(modelName + ' (Tuned)', tunedCode, 'advanced');
           });
 
-          actionRow.append(insertTunedBtn, copyTunedBtn, previewTunedBtn);
+          if (!this._canUseCodeAction('insert')) {
+            actionRow.append(previewTunedBtn);
+          } else {
+            actionRow.append(insertTunedBtn, copyTunedBtn, previewTunedBtn);
+          }
           card.appendChild(actionRow);
         } else if (typeof item?.code_error === 'string') {
           const codeWarning = document.createElement('div');
@@ -2899,8 +3417,8 @@ export class ModelMindStudioWidget extends Widget {
               `Tuning finished: ${String(job.result?.models_completed ?? 0)}/` +
               `${names.length} models fully searched.` +
               (job.result?.timed_out ? ' Time budget reached.' : '') +
-              ` ${codeSync.updated} Model Advisor card(s) now show tuning recommendations.` +
-              ' The "Insert into Notebook" button still inserts baseline code — apply the shown parameter changes manually!';
+              ` ${codeSync.updated} Model Advisor card(s) now have CV-checked code.` +
+              ' Only changes with a meaningful, consistent CV gain replace defaults; holdout accuracy can still differ.';
             break;
           }
 
@@ -3268,28 +3786,64 @@ export class ModelMindStudioWidget extends Widget {
             changesList.appendChild(itemEl);
           });
         }
+        if (
+          changesList.childElementCount === 0 &&
+          model.tuned_recommendation_status === 'defaults_recommended'
+        ) {
+          changesList.textContent =
+            'Default parameters are the best-supported choice: no tested alternative beat the baseline by a meaningful, consistent margin on the same CV folds.';
+        } else if (
+          changesList.childElementCount === 0 &&
+          model.tuned_recommendation_status === 'insufficient_validation'
+        ) {
+          changesList.textContent =
+            'Defaults were retained because there were not enough CV folds to support a reliable tuning decision.';
+        } else if (changesList.childElementCount === 0) {
+          changesList.textContent =
+            'No parameter changes were validated. The generated code preserves the baseline settings.';
+        }
 
         const bannerNote = document.createElement('div');
-        bannerNote.style.cssText = 'font-size:10.5px; color:#475569; margin-top:6px; line-height:1.4;';
+        bannerNote.style.cssText =
+          'font-size:10.5px; color:#475569; margin-top:6px; line-height:1.4;';
         bannerNote.innerHTML =
-          '<b>Workflow:</b> <i>"Insert Baseline Code"</i> inserts the model code before tuning. ' +
-          'Run it first in your notebook, then manually change the parameter values as shown above to compare results!';
+          '<b>Evaluation note:</b> The recommended code applies the tested estimator settings; when defaults are recommended, it uses the same estimator settings as baseline code. ' +
+          'Its held-out score can differ from CV, and no tuning search can guarantee higher accuracy on new data.';
 
         const bannerActions = document.createElement('div');
-        bannerActions.style.cssText = 'display:flex; gap:8px; margin-top:8px; align-items:center; flex-wrap:wrap;';
+        bannerActions.style.cssText =
+          'display:flex; gap:8px; margin-top:8px; align-items:center; flex-wrap:wrap;';
+
+        const previewTunedDirectBtn = document.createElement('button');
+        previewTunedDirectBtn.type = 'button';
+        previewTunedDirectBtn.className = 'mm-studio-btn mm-btn-sm';
+        previewTunedDirectBtn.textContent = '🔍 Preview Recommended Code';
+        previewTunedDirectBtn.addEventListener('click', () => {
+          this._showCodePreviewModal(
+            model.name + ' (Recommended)',
+            getTunedCode(),
+            'advanced'
+          );
+        });
 
         const insertTunedDirectBtn = document.createElement('button');
         insertTunedDirectBtn.type = 'button';
         insertTunedDirectBtn.className = 'mm-studio-btn mm-btn-sm';
         insertTunedDirectBtn.style.cssText =
           'background:#f0fdf4; border:1px solid #86efac; color:#15803d; font-weight:600; font-size:10.5px; cursor:pointer;';
-        insertTunedDirectBtn.innerHTML = '⚡ Insert Already-Tuned Code Instead';
+        insertTunedDirectBtn.innerHTML = model.tuned_changes?.length
+          ? '⚡ Insert CV-Selected Code'
+          : '⚡ Insert Recommended Default Code';
         insertTunedDirectBtn.addEventListener('click', () => {
           const ok = this._insertCodeBelow(getTunedCode());
           this._showToast(ok ? `✓ Tuned ${model.name} code inserted!` : 'Open a notebook first.');
         });
 
-        bannerActions.append(insertTunedDirectBtn);
+        if (!this._canUseCodeAction('insert')) {
+          bannerActions.append(previewTunedDirectBtn);
+        } else {
+          bannerActions.append(insertTunedDirectBtn);
+        }
         tunedBanner.append(bannerHdr, changesList, bannerNote, bannerActions);
       } else {
         card.style.borderColor = model.rank === 1 ? '#fde047' : '#dfe3ea';
@@ -3314,7 +3868,11 @@ export class ModelMindStudioWidget extends Widget {
       card.appendChild(note);
     }
 
-    btnRow.append(previewBtn, copyBtn2, insertBtn2);
+    if (!this._canUseCodeAction('insert')) {
+      btnRow.append(previewBtn);
+    } else {
+      btnRow.append(previewBtn, copyBtn2, insertBtn2);
+    }
     card.append(tunedBanner, btnRow);
 
     // Initialize display state
@@ -3814,135 +4372,7 @@ export class ModelMindStudioWidget extends Widget {
   }
 
   // ═════════════════════════════════════════════════════════════════
-  // VIEW 6: ⚠️ ML INSPECTOR (MISTAKE DETECTOR)
-  // ═════════════════════════════════════════════════════════════════
-  private _renderInspectorTab(): void {
-    const frag = document.createDocumentFragment();
-
-    const hdr = document.createElement('div');
-    hdr.className = 'mm-studio-section';
-    hdr.innerHTML = `
-      <div class="mm-studio-sec-title"><span>⚠️</span> ML Code Inspector & Leakage Checker</div>
-      <div class="mm-studio-sec-sub">Scans code for data leakage, invalid scaling order, and ML anti-patterns.</div>
-    `;
-
-    const codeArea = document.createElement('textarea');
-    codeArea.className = 'mm-inspector-textarea';
-    codeArea.placeholder = 'Paste or scan Python ML code here...';
-
-    // Auto-populate from active cell if available
-    const activeCell = this._notebooks.activeCell;
-    if (activeCell && isCodeCellModel(activeCell.model)) {
-      const src = activeCell.model.toJSON().source;
-      codeArea.value = Array.isArray(src) ? src.join('') : src;
-    }
-
-    const btnRow = document.createElement('div');
-    btnRow.style.cssText = 'display:flex; gap:8px; margin-top:8px;';
-
-    const scanActiveBtn = document.createElement('button');
-    scanActiveBtn.type = 'button';
-    scanActiveBtn.className = 'mm-studio-btn mm-btn-sm';
-    scanActiveBtn.innerHTML = '⚡ Fetch Active Cell';
-    scanActiveBtn.addEventListener('click', () => {
-      const cell = this._notebooks.activeCell;
-      if (cell && isCodeCellModel(cell.model)) {
-        const src = cell.model.toJSON().source;
-        codeArea.value = Array.isArray(src) ? src.join('') : src;
-        this._showToast('Fetched active cell code.');
-      } else {
-        this._showToast('Select an active code cell first.');
-      }
-    });
-
-    const checkBtn = document.createElement('button');
-    checkBtn.type = 'button';
-    checkBtn.className = 'mm-studio-btn mm-btn-sm mm-btn-primary';
-    checkBtn.innerHTML = '🔍 Scan for ML Mistakes';
-
-    btnRow.append(scanActiveBtn, checkBtn);
-    hdr.append(codeArea, btnRow);
-    frag.appendChild(hdr);
-
-    const resultContainer = document.createElement('div');
-    resultContainer.className = 'mm-inspector-results';
-    frag.appendChild(resultContainer);
-
-    checkBtn.addEventListener('click', async () => {
-      const code = codeArea.value.trim();
-      if (!code) {
-        resultContainer.innerHTML = '<div class="mm-studio-empty">Enter code to scan.</div>';
-        return;
-      }
-
-      resultContainer.innerHTML = '<div class="mm-studio-loading">Inspecting AST for ML anti-patterns...</div>';
-      try {
-        const res = await requestAPI<MLMistakeResult>('api/ai/ml-check', this._app.serviceManager.serverSettings, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ code, level: this._prepLevel })
-        });
-
-        resultContainer.replaceChildren();
-
-        if (res.finding_count === 0) {
-          resultContainer.innerHTML = `
-            <div class="mm-studio-alert mm-alert-info">
-              ✅ <b>Clean Code:</b> No data leakage or critical ML methodology flaws detected!
-            </div>
-          `;
-          return;
-        }
-
-        const countHeader = document.createElement('div');
-        countHeader.style.cssText = 'font-weight:700; font-size:12px; margin-bottom:8px; color:#f87171;';
-        countHeader.textContent = `Found ${res.finding_count} potential ML mistake(s):`;
-        resultContainer.appendChild(countHeader);
-
-        res.findings.forEach(f => {
-          const card = document.createElement('div');
-          card.className = 'mm-studio-card mm-mistake-card';
-          const sevColor = f.severity === 'high' ? '#ef4444' : '#f59e0b';
-          const msg = f.message || (f as any).what_happened || '';
-          const expl = f.explanation || (f as any).why_it_matters || (f as any).recommendation || '';
-          const fix = f.suggested_fix || (f as any).code_example || '';
-
-          card.innerHTML = `
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
-              <span style="font-weight:700; font-size:12px; color:${sevColor};">${f.title}</span>
-              <span class="mm-studio-badge" style="background:${sevColor}22; color:${sevColor}; border:1px solid ${sevColor}44;">
-                ${f.severity.toUpperCase()}
-              </span>
-            </div>
-            ${f.line_number ? `<div style="font-size:10px; opacity:.6; margin-bottom:4px;">Line: ${f.line_number}</div>` : ''}
-            <div style="font-size:11px; margin-bottom:6px;">${msg}</div>
-            ${expl ? `<div style="font-size:11px; opacity:.85; background:rgba(0,0,0,0.25); padding:6px 8px; border-radius:6px; font-family:monospace; margin-bottom:8px; line-height:1.4;">${expl}</div>` : ''}
-          `;
-
-          if (fix) {
-            const insBtn = document.createElement('button');
-            insBtn.type = 'button';
-            insBtn.className = 'mm-studio-btn mm-btn-sm mm-btn-primary';
-            insBtn.textContent = '📥 Insert Fixed Code';
-            insBtn.addEventListener('click', () => {
-              this._insertCodeBelow(fix);
-              this._showToast('Inserted corrected code into notebook!');
-            });
-            card.appendChild(insBtn);
-          }
-
-          resultContainer.appendChild(card);
-        });
-      } catch (err) {
-        resultContainer.innerHTML = `<div class="mm-studio-alert mm-alert-error">${err instanceof Error ? err.message : 'Check failed.'}</div>`;
-      }
-    });
-
-    this._contentArea.appendChild(frag);
-  }
-
-  // ═════════════════════════════════════════════════════════════════
-  // VIEW 7: 📖 PREPROCESSING & ML GUIDE
+  // VIEW 6: 📖 PREPROCESSING & ML GUIDE
   // ═════════════════════════════════════════════════════════════════
   private _renderGuideTab(): void {
     const frag = document.createDocumentFragment();
@@ -4012,7 +4442,22 @@ export class ModelMindStudioWidget extends Widget {
           : 'Open a notebook and select a cell before inserting the install command.'
       );
     });
-    installActions.appendChild(insertInstallButton);
+    if (!this._canUseCodeAction('copy')) {
+      const previewInstallButton = document.createElement('button');
+      previewInstallButton.type = 'button';
+      previewInstallButton.className = 'mm-studio-btn mm-btn-sm';
+      previewInstallButton.textContent = '🔍 Preview Code';
+      previewInstallButton.addEventListener('click', () => {
+        this._showCodePreviewModal(
+          'ML library install command',
+          installCommand,
+          'basic'
+        );
+      });
+      installActions.replaceChildren(previewInstallButton);
+    } else {
+      installActions.appendChild(insertInstallButton);
+    }
 
     installCard.append(
       installTitle,

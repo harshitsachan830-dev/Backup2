@@ -3,9 +3,14 @@ import {
   JupyterFrontEndPlugin
 } from '@jupyterlab/application';
 import { isCodeCellModel } from '@jupyterlab/cells';
+import { IDocumentManager } from '@jupyterlab/docmanager';
 import { IMainMenu } from '@jupyterlab/mainmenu';
 import type { IError, IOutput } from '@jupyterlab/nbformat';
-import { INotebookTracker, NotebookActions } from '@jupyterlab/notebook';
+import {
+  INotebookTracker,
+  NotebookActions,
+  NotebookPanel
+} from '@jupyterlab/notebook';
 import { ITranslator } from '@jupyterlab/translation';
 import { Widget } from '@lumino/widgets';
 
@@ -15,8 +20,17 @@ import { applyFixToCellModel } from './fix-utils';
 import { requestAPI } from './request';
 import { createModelMindStudioWidget } from './modelmind-studio';
 import { createFAB as createTutorFAB, loadTutorExplanation } from './debugger-tutor';
-import { createAIChatbotPanel } from './ai-chatbot';
+import {
+  createAIChatbotPanel,
+  type CodeTraceEvent,
+  type DecisionTreeView,
+  type NeuralNetworkView,
+  type TrainingResult,
+  type TrainingSource
+} from './ai-chatbot';
 import { createAPIKeySettingsWidget } from './api-key-settings';
+import { MODEL_MIND_NOTEBOOK_TYPE } from './notebook-mode';
+import type { ModelMindNotebookRole } from './notebook-mode';
 
 const COMMAND_ID = '@ml-platform/error-assistant:open';
 const MAX_CODE_LENGTH = 20_000;
@@ -343,12 +357,13 @@ const plugin: JupyterFrontEndPlugin<void> = {
   id: '@ml-platform/error-assistant:plugin',
   description: 'JupyterLab error assistant frontend and server extension',
   autoStart: true,
-  requires: [IMainMenu, INotebookTracker, ITranslator],
+  requires: [IMainMenu, INotebookTracker, ITranslator, IDocumentManager],
   activate: (
     app: JupyterFrontEnd,
     mainMenu: IMainMenu,
     notebooks: INotebookTracker,
-    translator: ITranslator
+    translator: ITranslator,
+    documentManager: IDocumentManager
   ) => {
     const trans = translator.load('@ml-platform/error-assistant');
 
@@ -923,10 +938,516 @@ const plugin: JupyterFrontEndPlugin<void> = {
       return captureActiveError(cell) || _lastCapturedError;
     };
 
+    const runCodeTraceForChat = async (source: string): Promise<{
+      events: CodeTraceEvent[];
+      output: string;
+      error?: string;
+    }> => {
+      const kernel = notebooks.currentWidget?.sessionContext.session?.kernel;
+      if (!kernel || kernel.isDisposed) {
+        throw new Error('Start a notebook kernel before capturing an execution trace.');
+      }
+
+      const marker = `__MODELMIND_TRACE_${Date.now()}__:`;
+      const wrappedCode = `
+import json as _mm_json
+def _mm_trace_runner(_mm_source):
+    import sys as _mm_sys
+    import ast as _mm_ast
+    _mm_tracked_names = {node.id for node in _mm_ast.walk(_mm_ast.parse(_mm_source)) if isinstance(node, _mm_ast.Name)}
+    _mm_events = []
+    _mm_filename = '<modelmind-execution-trace>'
+    def _mm_trace(frame, event, arg):
+        if frame.f_code.co_filename != _mm_filename:
+            return None
+        if event == 'line':
+            if len(_mm_events) >= 1000:
+                raise RuntimeError('Trace stopped after 1,000 Python line events.')
+            _mm_variables = {}
+            for _mm_name, _mm_value in frame.f_locals.items():
+                if _mm_name not in _mm_tracked_names:
+                    continue
+                if isinstance(_mm_value, (str, int, float, bool, type(None))):
+                    _mm_value_text = repr(_mm_value)
+                elif isinstance(_mm_value, (list, tuple, dict)) and len(_mm_value) <= 8:
+                    if all(isinstance(_mm_item, (str, int, float, bool, type(None))) for _mm_item in (_mm_value.values() if isinstance(_mm_value, dict) else _mm_value)):
+                        _mm_value_text = repr(_mm_value)
+                    else:
+                        continue
+                elif type(_mm_value).__module__.startswith('pandas') and hasattr(_mm_value, 'shape'):
+                    _mm_value_text = '<' + type(_mm_value).__name__ + ' shape=' + str(_mm_value.shape) + '>'
+                elif type(_mm_value).__module__.startswith('numpy') and hasattr(_mm_value, 'item'):
+                    try:
+                        _mm_value_text = repr(_mm_value.item())
+                    except Exception:
+                        continue
+                else:
+                    continue
+                _mm_variables[_mm_name] = _mm_value_text[:100]
+                if len(_mm_variables) >= 12:
+                    break
+            _mm_events.append({'line': frame.f_lineno, 'functionName': frame.f_code.co_name, 'variables': _mm_variables})
+        return _mm_trace
+
+    _mm_previous_trace = _mm_sys.gettrace()
+    try:
+        _mm_sys.settrace(_mm_trace)
+        try:
+            exec(compile(_mm_source, _mm_filename, 'exec'), get_ipython().user_ns, get_ipython().user_ns)
+            return _mm_events, None
+        except BaseException as _mm_exc:
+            return _mm_events, type(_mm_exc).__name__ + ': ' + str(_mm_exc)
+    finally:
+        _mm_sys.settrace(_mm_previous_trace)
+
+_mm_events, _mm_error = _mm_trace_runner(${JSON.stringify(source)})
+print(${JSON.stringify(marker)} + _mm_json.dumps({'events': _mm_events, 'error': _mm_error}))
+del _mm_events, _mm_error, _mm_trace_runner, _mm_json
+`;
+      let capturedOutput = '';
+      const future = kernel.requestExecute({
+        code: wrappedCode,
+        silent: false,
+        store_history: false,
+        allow_stdin: false,
+        stop_on_error: true
+      });
+      future.onIOPub = message => {
+        if (message.header.msg_type === 'stream') {
+          capturedOutput += (message.content as { text?: string }).text ?? '';
+        }
+      };
+      await future.done;
+
+      const markerIndex = capturedOutput.lastIndexOf(marker);
+      if (markerIndex < 0) {
+        throw new Error('The kernel did not return a trace. Check that it is responsive, then try again.');
+      }
+      const output = capturedOutput.slice(0, markerIndex).trim();
+      const payload = JSON.parse(capturedOutput.slice(markerIndex + marker.length).trim()) as {
+        events?: CodeTraceEvent[];
+        error?: string | null;
+      };
+      return {
+        events: Array.isArray(payload.events) ? payload.events : [],
+        output,
+        error: payload.error || undefined
+      };
+    };
+
+    const loadDecisionTreesForChat = async (): Promise<DecisionTreeView[]> => {
+      const kernel = notebooks.currentWidget?.sessionContext.session?.kernel;
+      if (!kernel || kernel.isDisposed) {
+        throw new Error('Start a notebook kernel and fit a decision tree before opening this view.');
+      }
+      const marker = `__MODELMIND_TREES_${Date.now()}__:`;
+      const code = `
+import json as _mm_json
+def _mm_describe_tree(_mm_name, _mm_estimator, _mm_namespace):
+    _mm_tree = _mm_estimator.tree_
+    _mm_task = 'classification' if hasattr(_mm_estimator, 'classes_') else 'regression'
+    _mm_class_values = getattr(_mm_estimator, 'classes_', [])
+    if hasattr(_mm_class_values, 'tolist'):
+        _mm_class_values = _mm_class_values.tolist()
+    _mm_feature_names = getattr(_mm_estimator, 'feature_names_in_', [])
+    if hasattr(_mm_feature_names, 'tolist'):
+        _mm_feature_names = _mm_feature_names.tolist()
+    if not _mm_feature_names:
+        for _mm_data_name in ('X_train', 'X', 'features'):
+            _mm_data = _mm_namespace.get(_mm_data_name)
+            if hasattr(_mm_data, 'columns'):
+                _mm_feature_names = [str(_mm_column) for _mm_column in _mm_data.columns]
+                break
+    _mm_depths = [0] * _mm_tree.node_count
+    _mm_stack = [(0, 0)]
+    while _mm_stack:
+        _mm_index, _mm_depth = _mm_stack.pop()
+        if _mm_index >= _mm_tree.node_count:
+            continue
+        _mm_depths[_mm_index] = _mm_depth
+        _mm_left = int(_mm_tree.children_left[_mm_index])
+        _mm_right = int(_mm_tree.children_right[_mm_index])
+        if _mm_left != _mm_right:
+            _mm_stack.append((_mm_right, _mm_depth + 1))
+            _mm_stack.append((_mm_left, _mm_depth + 1))
+    _mm_nodes = []
+    for _mm_index in range(int(_mm_tree.node_count)):
+        if _mm_depths[_mm_index] > 10:
+            continue
+        _mm_left = int(_mm_tree.children_left[_mm_index])
+        _mm_right = int(_mm_tree.children_right[_mm_index])
+        _mm_leaf = _mm_left == _mm_right
+        _mm_feature_index = int(_mm_tree.feature[_mm_index])
+        _mm_feature = str(_mm_feature_names[_mm_feature_index]) if 0 <= _mm_feature_index < len(_mm_feature_names) else 'feature_' + str(_mm_feature_index)
+        _mm_values = _mm_tree.value[_mm_index][0].tolist()
+        if _mm_task == 'classification' and _mm_values:
+            _mm_prediction_index = max(range(len(_mm_values)), key=lambda _mm_i: _mm_values[_mm_i])
+            _mm_prediction = str(_mm_class_values[_mm_prediction_index]) if _mm_prediction_index < len(_mm_class_values) else 'class ' + str(_mm_prediction_index)
+        else:
+            _mm_prediction = str(_mm_values[0]) if _mm_values else 'unknown'
+        _mm_nodes.append({
+            'id': _mm_index,
+            'depth': _mm_depths[_mm_index],
+            'left': None if _mm_leaf else _mm_left,
+            'right': None if _mm_leaf else _mm_right,
+            'feature': _mm_feature,
+            'threshold': None if _mm_leaf else float(_mm_tree.threshold[_mm_index]),
+            'samples': int(_mm_tree.n_node_samples[_mm_index]),
+            'impurity': float(_mm_tree.impurity[_mm_index]),
+            'prediction': _mm_prediction
+        })
+    return {
+        'modelName': _mm_name,
+        'task': _mm_task,
+        'criterion': str(getattr(_mm_estimator, 'criterion', 'tree split')),
+        'nodeCount': int(_mm_tree.node_count),
+        'maxDepth': int(_mm_tree.max_depth),
+        'nodes': _mm_nodes
+    }
+
+_mm_namespace = get_ipython().user_ns
+_mm_trees = []
+_mm_seen = set()
+for _mm_name, _mm_object in list(_mm_namespace.items()):
+    # IPython stores the previous cell result under _, __, and ___. These can
+    # point at an older fitted tree and should not appear as named user models.
+    if _mm_name.startswith('_') or _mm_name in ('In', 'Out'):
+        continue
+    _mm_candidates = [(_mm_name, _mm_object)]
+    for _mm_step_name, _mm_step in getattr(_mm_object, 'steps', []) or []:
+        _mm_candidates.append((_mm_name + '.' + str(_mm_step_name), _mm_step))
+    for _mm_candidate_name, _mm_candidate in _mm_candidates:
+        try:
+            _mm_tree_id = id(_mm_candidate)
+            if _mm_tree_id in _mm_seen or not hasattr(_mm_candidate, 'tree_'):
+                continue
+            _mm_seen.add(_mm_tree_id)
+            _mm_trees.append(_mm_describe_tree(_mm_candidate_name, _mm_candidate, _mm_namespace))
+        except Exception:
+            continue
+    if len(_mm_trees) >= 10:
+        break
+print(${JSON.stringify(marker)} + _mm_json.dumps(_mm_trees))
+for _mm_cleanup_name in ('_mm_describe_tree', '_mm_namespace', '_mm_trees', '_mm_seen', '_mm_name', '_mm_object', '_mm_candidates', '_mm_candidate_name', '_mm_candidate', '_mm_step_name', '_mm_step', '_mm_tree_id', '_mm_json'):
+    get_ipython().user_ns.pop(_mm_cleanup_name, None)
+`;
+      let capturedOutput = '';
+      const future = kernel.requestExecute({ code, silent: false, store_history: false, allow_stdin: false, stop_on_error: true });
+      future.onIOPub = message => {
+        if (message.header.msg_type === 'stream') {
+          capturedOutput += (message.content as { text?: string }).text ?? '';
+        }
+      };
+      await future.done;
+      const markerIndex = capturedOutput.lastIndexOf(marker);
+      if (markerIndex < 0) {
+        throw new Error('Could not read a fitted tree from the current kernel. Confirm the model was fitted with scikit-learn.');
+      }
+      return JSON.parse(capturedOutput.slice(markerIndex + marker.length).trim()) as DecisionTreeView[];
+    };
+
+    const loadNeuralNetworksForChat = async (): Promise<NeuralNetworkView[]> => {
+      const kernel = notebooks.currentWidget?.sessionContext.session?.kernel;
+      if (!kernel || kernel.isDisposed) {
+        throw new Error('Start a notebook kernel and fit a neural network before opening this view.');
+      }
+      const marker = `__MODELMIND_NEURAL_NETWORKS_${Date.now()}__:`;
+      const code = `
+import json as _mm_json
+def _mm_even_samples(_mm_size, _mm_limit=12):
+    if _mm_size <= _mm_limit:
+        return list(range(_mm_size))
+    return sorted(set(round(_mm_i * (_mm_size - 1) / (_mm_limit - 1)) for _mm_i in range(_mm_limit)))
+_mm_namespace = get_ipython().user_ns
+_mm_networks = []
+_mm_seen = set()
+for _mm_name, _mm_object in list(_mm_namespace.items()):
+    if _mm_name.startswith('_') or _mm_name in ('In', 'Out'):
+        continue
+    _mm_parent_features = getattr(_mm_object, 'feature_names_in_', [])
+    if hasattr(_mm_parent_features, 'tolist'):
+        _mm_parent_features = _mm_parent_features.tolist()
+    _mm_candidates = [(_mm_name, _mm_object, _mm_parent_features)]
+    for _mm_step_name, _mm_step in getattr(_mm_object, 'steps', []) or []:
+        _mm_candidates.append((_mm_name + '.' + str(_mm_step_name), _mm_step, _mm_parent_features))
+    for _mm_candidate_name, _mm_model, _mm_parent_feature_names in _mm_candidates:
+        try:
+            _mm_kind = type(_mm_model).__name__
+            if _mm_kind not in ('MLPClassifier', 'MLPRegressor') or not hasattr(_mm_model, 'coefs_'):
+                continue
+            if id(_mm_model) in _mm_seen:
+                continue
+            _mm_seen.add(id(_mm_model))
+            _mm_coefs = _mm_model.coefs_
+            _mm_sizes = [int(_mm_coefs[0].shape[0])] + [int(_mm_matrix.shape[1]) for _mm_matrix in _mm_coefs]
+            _mm_indices = [_mm_even_samples(_mm_size) for _mm_size in _mm_sizes]
+            _mm_features = getattr(_mm_model, 'feature_names_in_', [])
+            if hasattr(_mm_features, 'tolist'):
+                _mm_features = _mm_features.tolist()
+            if len(_mm_features) != _mm_sizes[0]:
+                _mm_features = _mm_parent_feature_names
+            if len(_mm_features) != _mm_sizes[0]:
+                _mm_features = []
+                for _mm_data_name in ('X_train_scaled', 'X_train', 'X', 'features'):
+                    _mm_data = _mm_namespace.get(_mm_data_name)
+                    if hasattr(_mm_data, 'columns') and len(_mm_data.columns) == _mm_sizes[0]:
+                        _mm_features = [str(_mm_column) for _mm_column in _mm_data.columns]
+                        break
+            _mm_classes = getattr(_mm_model, 'classes_', [])
+            if hasattr(_mm_classes, 'tolist'):
+                _mm_classes = _mm_classes.tolist()
+            _mm_layers = []
+            for _mm_layer_index, _mm_size in enumerate(_mm_sizes):
+                if _mm_layer_index == 0:
+                    _mm_label = 'Input'
+                elif _mm_layer_index == len(_mm_sizes) - 1:
+                    _mm_label = 'Output'
+                else:
+                    _mm_label = 'Hidden ' + str(_mm_layer_index)
+                _mm_nodes = []
+                for _mm_node_index in _mm_indices[_mm_layer_index]:
+                    _mm_node_label = 'unit ' + str(_mm_node_index)
+                    if _mm_layer_index == 0 and len(_mm_features) == _mm_size:
+                        _mm_node_label = str(_mm_features[_mm_node_index])
+                    elif _mm_layer_index == len(_mm_sizes) - 1 and len(_mm_classes) == _mm_size:
+                        _mm_node_label = str(_mm_classes[_mm_node_index])
+                    _mm_nodes.append({'index': int(_mm_node_index), 'label': _mm_node_label})
+                _mm_layers.append({'label': _mm_label, 'size': _mm_size, 'nodes': _mm_nodes})
+            _mm_connections = []
+            for _mm_layer_index, _mm_matrix in enumerate(_mm_coefs):
+                for _mm_from_index in _mm_indices[_mm_layer_index]:
+                    for _mm_to_index in _mm_indices[_mm_layer_index + 1]:
+                        _mm_connections.append({
+                            'fromLayer': _mm_layer_index,
+                            'fromNode': int(_mm_from_index),
+                            'toNode': int(_mm_to_index),
+                            'weight': float(_mm_matrix[_mm_from_index, _mm_to_index])
+                        })
+            _mm_networks.append({
+                'modelName': _mm_candidate_name,
+                'modelType': _mm_kind,
+                'task': 'classification' if _mm_kind == 'MLPClassifier' else 'regression',
+                'activation': str(getattr(_mm_model, 'activation', 'unknown')),
+                'outputActivation': str(getattr(_mm_model, 'out_activation_', 'unknown')),
+                'loss': str(getattr(_mm_model, 'loss_', 'unknown')),
+                'epochs': int(getattr(_mm_model, 'n_iter_', 0)),
+                'layers': _mm_layers,
+                'connections': _mm_connections,
+                'classes': [str(_mm_class) for _mm_class in _mm_classes]
+            })
+        except Exception:
+            continue
+    if len(_mm_networks) >= 10:
+        break
+print(${JSON.stringify(marker)} + _mm_json.dumps(_mm_networks))
+for _mm_cleanup_name in ('_mm_even_samples', '_mm_namespace', '_mm_networks', '_mm_seen', '_mm_name', '_mm_object', '_mm_parent_features', '_mm_candidates', '_mm_step_name', '_mm_step', '_mm_candidate_name', '_mm_model', '_mm_parent_feature_names', '_mm_kind', '_mm_coefs', '_mm_sizes', '_mm_indices', '_mm_features', '_mm_data_name', '_mm_data', '_mm_column', '_mm_classes', '_mm_layers', '_mm_layer_index', '_mm_size', '_mm_label', '_mm_nodes', '_mm_node_index', '_mm_node_label', '_mm_connections', '_mm_matrix', '_mm_from_index', '_mm_to_index', '_mm_json'):
+    get_ipython().user_ns.pop(_mm_cleanup_name, None)
+`;
+      let capturedOutput = '';
+      const future = kernel.requestExecute({ code, silent: false, store_history: false, allow_stdin: false, stop_on_error: true });
+      future.onIOPub = message => {
+        if (message.header.msg_type === 'stream') {
+          capturedOutput += (message.content as { text?: string }).text ?? '';
+        }
+      };
+      await future.done;
+      const markerIndex = capturedOutput.lastIndexOf(marker);
+      if (markerIndex < 0) {
+        throw new Error('Could not inspect fitted neural networks. Fit a scikit-learn MLPClassifier or MLPRegressor first.');
+      }
+      return JSON.parse(capturedOutput.slice(markerIndex + marker.length).trim()) as NeuralNetworkView[];
+    };
+
+    const loadTrainingSourcesForChat = async (): Promise<TrainingSource[]> => {
+      const kernel = notebooks.currentWidget?.sessionContext.session?.kernel;
+      if (!kernel || kernel.isDisposed) {
+        throw new Error('Start a notebook kernel and define feature and target variables before training.');
+      }
+      const marker = `__MODELMIND_TRAINING_SOURCES_${Date.now()}__:`;
+      const code = `
+import json as _mm_json
+from sklearn.utils.multiclass import type_of_target as _mm_type_of_target
+_mm_ns = get_ipython().user_ns
+_mm_pairs = [
+    ('X_train', 'y_train', 'X_test', 'y_test'),
+    ('X_train_scaled', 'y_train', 'X_test_scaled', 'y_test'),
+    ('X', 'y', None, None),
+    ('features', 'target', None, None)
+]
+_mm_sources = []
+_mm_seen = set()
+for _mm_x_name, _mm_y_name, _mm_x_test_name, _mm_y_test_name in _mm_pairs:
+    _mm_key = (_mm_x_name, _mm_y_name)
+    if _mm_key in _mm_seen:
+        continue
+    _mm_seen.add(_mm_key)
+    _mm_x = _mm_ns.get(_mm_x_name)
+    _mm_y = _mm_ns.get(_mm_y_name)
+    if _mm_x is None or _mm_y is None:
+        continue
+    try:
+        _mm_rows = len(_mm_x)
+        _mm_features = int(_mm_x.shape[1])
+        if _mm_rows < 5 or _mm_features < 1 or len(_mm_y) != _mm_rows:
+            continue
+        _mm_target_kind = _mm_type_of_target(_mm_y)
+        if _mm_target_kind in ('binary', 'multiclass'):
+            _mm_task = 'classification'
+        elif _mm_target_kind in ('continuous', 'continuous-multioutput'):
+            _mm_task = 'regression'
+        else:
+            continue
+        _mm_has_test = bool(_mm_x_test_name and _mm_y_test_name and _mm_ns.get(_mm_x_test_name) is not None and _mm_ns.get(_mm_y_test_name) is not None)
+        _mm_sources.append({
+            'id': _mm_x_name + '|' + _mm_y_name,
+            'featuresName': _mm_x_name,
+            'targetName': _mm_y_name,
+            'testFeaturesName': _mm_x_test_name if _mm_has_test else None,
+            'testTargetName': _mm_y_test_name if _mm_has_test else None,
+            'rows': _mm_rows,
+            'featureCount': _mm_features,
+            'task': _mm_task
+        })
+    except Exception:
+        continue
+print(${JSON.stringify(marker)} + _mm_json.dumps(_mm_sources))
+for _mm_cleanup in ('_mm_type_of_target', '_mm_ns', '_mm_pairs', '_mm_sources', '_mm_seen', '_mm_x_name', '_mm_y_name', '_mm_x_test_name', '_mm_y_test_name', '_mm_key', '_mm_x', '_mm_y', '_mm_rows', '_mm_features', '_mm_target_kind', '_mm_task', '_mm_has_test', '_mm_json'):
+    get_ipython().user_ns.pop(_mm_cleanup, None)
+`;
+      let capturedOutput = '';
+      const future = kernel.requestExecute({ code, silent: false, store_history: false, allow_stdin: false, stop_on_error: true });
+      future.onIOPub = message => {
+        if (message.header.msg_type === 'stream') capturedOutput += (message.content as { text?: string }).text ?? '';
+      };
+      await future.done;
+      const markerIndex = capturedOutput.lastIndexOf(marker);
+      if (markerIndex < 0) throw new Error('Could not inspect feature/target variables in the current kernel.');
+      return JSON.parse(capturedOutput.slice(markerIndex + marker.length).trim()) as TrainingSource[];
+    };
+
+    const trainModelInNotebook = async (sourceId: string, modelType: string): Promise<TrainingResult> => {
+      const kernel = notebooks.currentWidget?.sessionContext.session?.kernel;
+      if (!kernel || kernel.isDisposed) throw new Error('Start a notebook kernel before training a model.');
+      const [featuresName, targetName] = sourceId.split('|');
+      if (!featuresName || !targetName) throw new Error('Choose a valid feature and target pair.');
+      if (!['decision_tree', 'random_forest', 'neural_network'].includes(modelType)) throw new Error('Choose a supported model type.');
+      const marker = `__MODELMIND_TRAINED_MODEL_${Date.now()}__:`;
+      const params = JSON.stringify({ featuresName, targetName, modelType });
+      const code = `
+import json as _mm_json
+import numpy as _mm_np
+from sklearn.model_selection import train_test_split as _mm_train_test_split
+from sklearn.utils.multiclass import type_of_target as _mm_type_of_target
+from sklearn.metrics import accuracy_score as _mm_accuracy, f1_score as _mm_f1, mean_absolute_error as _mm_mae, mean_squared_error as _mm_mse, r2_score as _mm_r2
+from sklearn.tree import DecisionTreeClassifier as _mm_DTC, DecisionTreeRegressor as _mm_DTR
+from sklearn.ensemble import RandomForestClassifier as _mm_RFC, RandomForestRegressor as _mm_RFR
+from sklearn.neural_network import MLPClassifier as _mm_MLPC, MLPRegressor as _mm_MLPR
+from sklearn.pipeline import make_pipeline as _mm_make_pipeline
+from sklearn.preprocessing import StandardScaler as _mm_StandardScaler
+_mm_args = _mm_json.loads(${JSON.stringify(params)})
+_mm_ns = get_ipython().user_ns
+_mm_X = _mm_ns.get(_mm_args['featuresName'])
+_mm_y = _mm_ns.get(_mm_args['targetName'])
+if _mm_X is None or _mm_y is None:
+    raise ValueError('The selected feature/target variables are no longer available. Run their notebook cells again.')
+if len(_mm_X) != len(_mm_y):
+    raise ValueError('Features and target have different row counts.')
+if hasattr(_mm_X, 'select_dtypes'):
+    _mm_bad = list(_mm_X.select_dtypes(include=['object', 'string', 'category']).columns)
+    if _mm_bad:
+        raise ValueError('Encode categorical feature columns first (for example, with pd.get_dummies(X)).')
+elif getattr(_mm_X, 'dtype', None) is not None and _mm_X.dtype.kind not in 'biufc':
+    raise ValueError('Encode categorical feature columns first (for example, with pd.get_dummies(X)).')
+_mm_target_kind = _mm_type_of_target(_mm_y)
+if _mm_target_kind in ('binary', 'multiclass'):
+    _mm_task = 'classification'
+elif _mm_target_kind in ('continuous', 'continuous-multioutput'):
+    _mm_task = 'regression'
+else:
+    raise ValueError('This target type is not supported. Use a one-dimensional classification or regression target.')
+_mm_X_test = None
+_mm_y_test = None
+_mm_test_x_name = _mm_args['featuresName'].replace('X_train_scaled', 'X_test_scaled').replace('X_train', 'X_test')
+_mm_test_y_name = _mm_args['targetName'].replace('y_train', 'y_test')
+if _mm_args['featuresName'] in ('X_train', 'X_train_scaled') and _mm_test_x_name != _mm_args['featuresName']:
+    _mm_X_test = _mm_ns.get(_mm_test_x_name)
+    _mm_y_test = _mm_ns.get(_mm_test_y_name)
+if _mm_X_test is not None and _mm_y_test is not None:
+    _mm_X_train, _mm_y_train = _mm_X, _mm_y
+    if len(_mm_X_test) != len(_mm_y_test):
+        raise ValueError('The existing test features and target have different row counts.')
+else:
+    _mm_stratify = None
+    if _mm_task == 'classification':
+        _mm_values, _mm_counts = _mm_np.unique(_mm_y, return_counts=True)
+        if len(_mm_counts) > 1 and _mm_counts.min() >= 2:
+            _mm_stratify = _mm_y
+    _mm_X_train, _mm_X_test, _mm_y_train, _mm_y_test = _mm_train_test_split(
+        _mm_X, _mm_y, test_size=0.2, random_state=42, stratify=_mm_stratify
+    )
+_mm_type = _mm_args['modelType']
+if _mm_task == 'classification':
+    if _mm_type == 'decision_tree': _mm_estimator = _mm_DTC(max_depth=6, random_state=42)
+    elif _mm_type == 'random_forest': _mm_estimator = _mm_RFC(n_estimators=150, random_state=42, n_jobs=-1)
+    else: _mm_estimator = _mm_make_pipeline(_mm_StandardScaler(with_mean=False), _mm_MLPC(hidden_layer_sizes=(32, 16), max_iter=500, random_state=42))
+else:
+    if _mm_type == 'decision_tree': _mm_estimator = _mm_DTR(max_depth=6, random_state=42)
+    elif _mm_type == 'random_forest': _mm_estimator = _mm_RFR(n_estimators=150, random_state=42, n_jobs=-1)
+    else: _mm_estimator = _mm_make_pipeline(_mm_StandardScaler(with_mean=False), _mm_MLPR(hidden_layer_sizes=(32, 16), max_iter=500, random_state=42))
+_mm_estimator.fit(_mm_X_train, _mm_y_train)
+_mm_prediction = _mm_estimator.predict(_mm_X_test)
+if _mm_task == 'classification':
+    _mm_primary = float(_mm_accuracy(_mm_y_test, _mm_prediction))
+    _mm_metric = 'Accuracy'
+    _mm_secondary = [{'label': 'Macro F1', 'value': float(_mm_f1(_mm_y_test, _mm_prediction, average='macro', zero_division=0))}]
+else:
+    _mm_primary = float(_mm_r2(_mm_y_test, _mm_prediction))
+    _mm_metric = 'R²'
+    _mm_secondary = [
+        {'label': 'MAE', 'value': float(_mm_mae(_mm_y_test, _mm_prediction))},
+        {'label': 'RMSE', 'value': float(_mm_np.sqrt(_mm_mse(_mm_y_test, _mm_prediction)))}
+    ]
+_mm_ns['modelmind_trained_model'] = _mm_estimator
+_mm_result = {
+    'modelName': 'modelmind_trained_model',
+    'modelType': _mm_type.replace('_', ' ').title(),
+    'task': _mm_task,
+    'trainRows': int(len(_mm_X_train)),
+    'testRows': int(len(_mm_X_test)),
+    'featureCount': int(_mm_X.shape[1]),
+    'primaryMetric': _mm_metric,
+    'primaryScore': _mm_primary,
+    'secondaryMetrics': _mm_secondary
+}
+print(${JSON.stringify(marker)} + _mm_json.dumps(_mm_result))
+for _mm_cleanup in ('_mm_args', '_mm_ns', '_mm_X', '_mm_y', '_mm_bad', '_mm_target_kind', '_mm_task', '_mm_X_test', '_mm_y_test', '_mm_test_x_name', '_mm_test_y_name', '_mm_stratify', '_mm_values', '_mm_counts', '_mm_X_train', '_mm_y_train', '_mm_type', '_mm_estimator', '_mm_prediction', '_mm_primary', '_mm_metric', '_mm_secondary', '_mm_result', '_mm_json', '_mm_np', '_mm_train_test_split', '_mm_type_of_target', '_mm_accuracy', '_mm_f1', '_mm_mae', '_mm_mse', '_mm_r2', '_mm_DTC', '_mm_DTR', '_mm_RFC', '_mm_RFR', '_mm_MLPC', '_mm_MLPR', '_mm_make_pipeline', '_mm_StandardScaler'):
+    get_ipython().user_ns.pop(_mm_cleanup, None)
+`;
+      let capturedOutput = '';
+      let executionError = '';
+      const future = kernel.requestExecute({ code, silent: false, store_history: false, allow_stdin: false, stop_on_error: true });
+      future.onIOPub = message => {
+        if (message.header.msg_type === 'stream') capturedOutput += (message.content as { text?: string }).text ?? '';
+        if (message.header.msg_type === 'error') executionError = (message.content as { evalue?: string }).evalue ?? 'Python training failed.';
+      };
+      await future.done;
+      const markerIndex = capturedOutput.lastIndexOf(marker);
+      if (markerIndex < 0) throw new Error(executionError || 'Python training did not return evaluation results.');
+      // The kernel can emit a warning or other stream text after our result marker.
+      // The trainer serializes its payload as one compact JSON line, so parse that line only.
+      const payloadLine = capturedOutput.slice(markerIndex + marker.length).replace(/^\s+/, '').split(/\r?\n/, 1)[0];
+      return JSON.parse(payloadLine) as TrainingResult;
+    };
+
     const chatbotRoot = createAIChatbotPanel(
       app.serviceManager.serverSettings,
       getActiveCodeForChat,
-      getActiveErrorForChat
+      getActiveErrorForChat,
+      runCodeTraceForChat,
+      loadDecisionTreesForChat,
+      loadNeuralNetworksForChat,
+      loadTrainingSourcesForChat,
+      trainModelInNotebook
     );
     chatbotWidget.node.style.cssText = 'height:100%;overflow:hidden;';
     chatbotWidget.node.appendChild(chatbotRoot);
@@ -983,6 +1504,44 @@ const plugin: JupyterFrontEndPlugin<void> = {
       }
     });
     mainMenu.viewMenu.addGroup([{ command: STUDIO_COMMAND }], 899);
+
+    const createNotebook = async (
+      role: ModelMindNotebookRole
+    ): Promise<void> => {
+      const notebook = await documentManager.newUntitled({
+        type: 'notebook'
+      });
+      const widget = documentManager.open(notebook.path);
+      if (!widget) {
+        throw new Error(`Could not open the new ${role} notebook.`);
+      }
+      if (!(widget instanceof NotebookPanel)) {
+        throw new Error(`The new ${role} document is not a notebook.`);
+      }
+      await widget.context.ready;
+      widget.context.model.setMetadata(MODEL_MIND_NOTEBOOK_TYPE, role);
+      studioWidget.refreshNotebookMode();
+    };
+
+    const MODEL_MIND_NOTEBOOK_COMMAND = 'modelmind:create-modelmind-notebook';
+    app.commands.addCommand(MODEL_MIND_NOTEBOOK_COMMAND, {
+      label: 'ModelMind Notebook',
+      execute: () => createNotebook('modelmind')
+    });
+
+    const TRAINER_NOTEBOOK_COMMAND = 'modelmind:create-trainer-notebook';
+    app.commands.addCommand(TRAINER_NOTEBOOK_COMMAND, {
+      label: 'Trainer Notebook',
+      execute: () => createNotebook('trainer')
+    });
+
+    mainMenu.fileMenu.newMenu.addGroup(
+      [
+        { command: MODEL_MIND_NOTEBOOK_COMMAND },
+        { command: TRAINER_NOTEBOOK_COMMAND }
+      ],
+      899
+    );
 
     // ─── Inject CSS for all left panels ───
     if (!document.getElementById('mm-left-panel-styles')) {

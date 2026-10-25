@@ -615,10 +615,23 @@ def analyze_feature(
 
             result.update({
                 "feature_type": "numerical",
+                "numeric_kind": "unknown",
                 "histogram_counts": [],
                 "histogram_edges": [],
                 "kde_x": [],
                 "kde_y": [],
+                "imputation_strategy": (
+                    "drop_column"
+                    if missing_count > 0
+                    else "none"
+                ),
+                "imputation_reason": (
+                    "No observed numeric values are available to estimate "
+                    "a mean, median, or mode. Review or drop this entirely "
+                    "missing feature instead of inventing a value."
+                    if missing_count > 0
+                    else "This feature has no values to analyze."
+                ),
             })
 
             return result
@@ -718,6 +731,15 @@ def analyze_feature(
 
         else:
             skewness = 0.0
+
+        integer_valued = bool(
+            (numeric_feature % 1 == 0).all()
+        )
+        numeric_kind = (
+            "discrete"
+            if integer_valued and numeric_feature.nunique() <= 20
+            else "continuous"
+        )
 
         if skewness > 1:
 
@@ -878,6 +900,27 @@ def analyze_feature(
                 "currently required."
             )
 
+        elif numeric_kind == "discrete":
+
+            imputation_strategy = "most_frequent"
+
+            imputation_reason = (
+                "The feature is integer-valued with a small number of "
+                "distinct values, so it behaves like a count or discrete "
+                "measurement. Mode imputation keeps replacements on an "
+                "observed value instead of creating fractional counts."
+            )
+
+        elif len(numeric_feature) < 8:
+
+            imputation_strategy = "median"
+
+            imputation_reason = (
+                "There are fewer than eight observed values, so sample "
+                "skewness is unstable. Median imputation is the more "
+                "conservative choice until more data is available."
+            )
+
         elif (
             abs(skewness) <= 0.5
             and
@@ -1013,6 +1056,9 @@ def analyze_feature(
 
             "feature_type":
                 "numerical",
+
+            "numeric_kind":
+                numeric_kind,
 
             "minimum":
                 minimum,

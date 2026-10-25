@@ -321,9 +321,20 @@ export default function PortalSections({
             title="Notebook"
             description="Write, run and experiment with Python right in your browser."
             action={
-              <OpenJupyterForm className="referencePrimaryLink">
-                Open Notebook <ArrowIcon />
-              </OpenJupyterForm>
+              <div className="referenceNotebookActions">
+                <OpenJupyterForm
+                  className="referencePrimaryLink"
+                  notebookType="modelmind"
+                >
+                  Open ModelMind Notebook <ArrowIcon />
+                </OpenJupyterForm>
+                <OpenJupyterForm
+                  className="referenceSecondaryLink"
+                  notebookType="trainer"
+                >
+                  Open Trainer Notebook <ArrowIcon />
+                </OpenJupyterForm>
+              </div>
             }
           />
           <div className="referenceNotebookGrid">

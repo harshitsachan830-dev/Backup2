@@ -1,17 +1,42 @@
 import type { PreprocessingRec } from './modelmind-studio';
 
+export function buildDatasetLoadingCode(selectedPath: string): string {
+  const datasetPath = JSON.stringify(selectedPath);
+  const extension = selectedPath
+    .split(/[?#]/, 1)[0]
+    .split('.')
+    .pop()
+    ?.toLowerCase();
+  const reader =
+    extension === 'xlsx' || extension === 'xls'
+      ? 'read_excel'
+      : extension === 'json'
+        ? 'read_json'
+        : 'read_csv';
+
+  return [
+    'import pandas as pd',
+    '',
+    `df = pd.${reader}(${datasetPath})`,
+    'print(f"Loaded dataset: {df.shape[0]} rows × {df.shape[1]} columns")'
+  ].join('\n');
+}
+
 export function buildFullPreprocessingCode(
   selectedPath: string,
   rec: PreprocessingRec,
-  selectedStrategy: string
+  selectedStrategy: string,
+  recommendedCode?: string
 ): string {
-  const datasetPath = JSON.stringify(selectedPath);
-  const extension = selectedPath.split(/[?#]/, 1)[0].split('.').pop()?.toLowerCase();
-  const reader = extension === 'xlsx' || extension === 'xls'
-    ? 'read_excel'
-    : extension === 'json'
-      ? 'read_json'
-      : 'read_csv';
+  if (recommendedCode?.trim()) {
+    return [
+      '# Recommended preprocessing workflow for the selected skill level',
+      buildDatasetLoadingCode(selectedPath),
+      '',
+      recommendedCode.trim()
+    ].join('\n');
+  }
+
   const imports = new Set(['import pandas as pd']);
   let strategy = selectedStrategy;
   if (strategy === 'most_frequent_or_unknown') {
@@ -42,7 +67,9 @@ export function buildFullPreprocessingCode(
     case 'constant':
       operation = [
         ...(rec.feature_type === 'numerical'
-          ? [`${featureAccess} = pd.to_numeric(${featureAccess}, errors="coerce")`]
+          ? [
+              `${featureAccess} = pd.to_numeric(${featureAccess}, errors="coerce")`
+            ]
           : []),
         `${featureAccess} = ${featureAccess}.fillna(${rec.feature_type === 'numerical' ? '0' : '"Unknown"'})`
       ].join('\n');
@@ -99,7 +126,7 @@ export function buildFullPreprocessingCode(
     '# Complete preprocessing workflow for the analyzed dataset',
     ...Array.from(imports),
     '',
-    `df = pd.${reader}(${datasetPath})`,
+    `df = pd.${getDatasetReader(selectedPath)}(${JSON.stringify(selectedPath)})`,
     'print(f"Loaded dataset: {df.shape[0]} rows × {df.shape[1]} columns")',
     '',
     '# Apply preprocessing only to the selected column',
@@ -111,9 +138,24 @@ export function buildFullPreprocessingCode(
     '',
     '# Preview only the selected column or its encoded output columns',
     ...(strategy === 'one_hot_encode'
-      ? [`print(df.loc[:, [column for column in df.columns if column == ${featureName} or column.startswith(${JSON.stringify(`${rec.feature}_`)})]].head())`]
+      ? [
+          `print(df.loc[:, [column for column in df.columns if column == ${featureName} or column.startswith(${JSON.stringify(`${rec.feature}_`)})]].head())`
+        ]
       : strategy === 'drop_column'
         ? ['print("Selected column was dropped as requested.")']
-        : [`print(df[[${featureName}]].head())`]),
+        : [`print(df[[${featureName}]].head())`])
   ].join('\n');
+}
+
+function getDatasetReader(selectedPath: string): string {
+  const extension = selectedPath
+    .split(/[?#]/, 1)[0]
+    .split('.')
+    .pop()
+    ?.toLowerCase();
+  return extension === 'xlsx' || extension === 'xls'
+    ? 'read_excel'
+    : extension === 'json'
+      ? 'read_json'
+      : 'read_csv';
 }

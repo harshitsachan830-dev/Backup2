@@ -52,8 +52,9 @@ MAX_TUNING_ROWS = 2000
 BASIC_MAX_TRIALS = 8
 ADVANCED_MAX_TRIALS = 20
 
-# Small improvements can be cross-validation noise.
-MIN_CLASSIFICATION_GAIN = 0.002
+# Small improvements can be cross-validation noise, especially when the
+# same folds are used to compare multiple candidate configurations.
+MIN_CLASSIFICATION_GAIN = 0.01
 MIN_REGRESSION_RELATIVE_GAIN = 0.005
 
 
@@ -107,7 +108,7 @@ def _meaningful_improvement(
     baseline_fold_scores: list[float],
     candidate_fold_scores: list[float],
 ) -> bool:
-    """Require a practical gain that exceeds paired fold noise."""
+    """Require a practical gain, paired-fold evidence, and consistent wins."""
 
     improvement = (
         candidate_score - baseline_score
@@ -145,7 +146,7 @@ def _meaningful_improvement(
     return (
         improvement > practical_threshold + noise_margin
         and sum(gain > 0 for gain in paired_gains)
-        >= math.ceil(2 * len(paired_gains) / 3)
+        >= math.ceil(0.8 * len(paired_gains))
     )
 
 
@@ -614,6 +615,22 @@ def tune_top_five(
             "best_params": recommended_changes,
             "recommended_changes": explained_changes,
             "recommendation_status": recommendation_status,
+            "selected_configuration": (
+                "defaults"
+                if recommendation_status
+                in {
+                    "defaults_recommended",
+                    "partial_defaults_recommended",
+                    "insufficient_validation",
+                }
+                else "tuned"
+                if recommendation_status
+                in {
+                    "parameter_changes_recommended",
+                    "partial_parameter_changes",
+                }
+                else "unavailable"
+            ),
             "attempts": attempts,
             "configurations_tested": len(attempts),
             "configurations_planned": len(

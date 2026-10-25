@@ -578,6 +578,12 @@ button {
   cursor: pointer;
 }
 
+.jupyterNotebookActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
 .jupyterLaunchButton {
   cursor: pointer;
 }
@@ -4456,6 +4462,42 @@ button {
   color: #fff;
   background: linear-gradient(90deg, #5145e5, #7c3aed);
   box-shadow: 0 7px 16px rgba(91, 61, 245, .22);
+}
+
+.referenceNotebookActions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.referenceSecondaryLink {
+  display: inline-flex;
+  min-height: 33px;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  padding: 0 13px;
+  border: 1px solid #d7ccfa;
+  border-radius: 9px;
+  color: #5145e5;
+  background: #fff;
+  box-shadow: 0 4px 12px rgba(91, 61, 245, .08);
+  font-size: 10px;
+  font-weight: 700;
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.referenceSecondaryLink svg {
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 .referencePrimaryLink svg {

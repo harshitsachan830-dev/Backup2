@@ -17,9 +17,20 @@ export default function JupyterWorkspace() {
           notebook demo. Your ModelMind extension provides Error Assistant,
           AI Chat, preprocessing tools, and ML Studio inside JupyterLab.
         </p>
-        <OpenJupyterForm className="jupyterLaunchButton">
-          Open ModelMind JupyterLab <span aria-hidden="true">↗</span>
-        </OpenJupyterForm>
+        <div className="jupyterNotebookActions">
+          <OpenJupyterForm
+            className="jupyterLaunchButton"
+            notebookType="modelmind"
+          >
+            Open ModelMind Notebook <span aria-hidden="true">↗</span>
+          </OpenJupyterForm>
+          <OpenJupyterForm
+            className="jupyterLaunchButton jupyterTrainerLaunchButton"
+            notebookType="trainer"
+          >
+            Open Trainer Notebook <span aria-hidden="true">↗</span>
+          </OpenJupyterForm>
+        </div>
         <a
           href="https://github.com/harshitsachan830-dev/Backup2/releases"
           rel="noreferrer"

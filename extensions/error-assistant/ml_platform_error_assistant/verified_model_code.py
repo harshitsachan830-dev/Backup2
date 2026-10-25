@@ -40,17 +40,17 @@ MODEL_SPECS: dict[str, tuple[str, str, str]] = {
     "random_forest_reg": (
         "regression",
         "from sklearn.ensemble import RandomForestRegressor",
-        "RandomForestRegressor(n_estimators=40, random_state=42)",
+        "RandomForestRegressor(n_estimators=40, max_depth=12, random_state=42, n_jobs=1)",
     ),
     "gradient_boosting_reg": (
         "regression",
         "from sklearn.ensemble import GradientBoostingRegressor",
-        "GradientBoostingRegressor(random_state=42)",
+        "GradientBoostingRegressor(n_estimators=60, random_state=42)",
     ),
     "xgboost_reg": (
         "regression",
         "from xgboost import XGBRegressor",
-        "XGBRegressor(n_estimators=60, random_state=42, n_jobs=1)",
+        "XGBRegressor(n_estimators=60, max_depth=4, learning_rate=0.1, objective='reg:squarederror', tree_method='hist', n_jobs=1, random_state=42, verbosity=0)",
     ),
     "logistic_regression": (
         "classification",
@@ -60,7 +60,7 @@ MODEL_SPECS: dict[str, tuple[str, str, str]] = {
     "random_forest_clf": (
         "classification",
         "from sklearn.ensemble import RandomForestClassifier",
-        "RandomForestClassifier(n_estimators=40, random_state=42)",
+        "RandomForestClassifier(n_estimators=40, max_depth=12, random_state=42, n_jobs=1)",
     ),
     "decision_tree": (
         "classification",
@@ -90,7 +90,7 @@ MODEL_SPECS: dict[str, tuple[str, str, str]] = {
     "xgboost_clf": (
         "classification",
         "from xgboost import XGBClassifier",
-        "XGBClassifier(n_estimators=60, random_state=42, n_jobs=1, eval_metric='logloss')",
+        "XGBClassifier(n_estimators=60, max_depth=4, learning_rate=0.1, tree_method='hist', eval_metric='logloss', n_jobs=1, random_state=42, verbosity=0)",
     ),
     'ridge_reg': (
         'regression',

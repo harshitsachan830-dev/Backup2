@@ -6,6 +6,8 @@ The notebook application is branded **ModelMind Notebook** with the supplied Mod
 
 The target product adds an error assistant that diagnoses notebook failures, uses local Ollama first for complex explanations, optionally routes to Gemini through a secured backend, and only offers code changes after sandbox validation. The website is hosted; Jupyter, Python execution, and optional Ollama run on each user's computer through a local companion. A browser-only page cannot silently install software on a user's computer.
 
+The full ModelMind Notebook workflow includes ML Studio preprocessing at Basic, Medium, and Advanced levels. It provides level-specific code examples and feature-specific **Why** explanations based on the uploaded CSV's observed statistics. These are data-informed recommendations, not guarantees about missingness or model performance; review the examples and validate preprocessing inside the training workflow.
+
 ## Status
 
 **Local notebook and Ollama flows are implemented and tested on the developer Mac.** Gemini code-fix fallback requires two opt-ins: the server must set `ML_PLATFORM_CLOUD_FALLBACK=enabled` and have a Gemini key configured, and the user must check **Allow Gemini fallback** in the assistant. Ollama remains first; Gemini is contacted only after Ollama cannot provide a valid fix. The UI warns that code, traceback, and adjacent cell context can be sent to Google. No credential is sent to the browser. A live key/model check and one generation call succeeded with `gemini-3.8-flash`; a later call returned a transient 503, and an ambiguous NameError test produced a syntactically valid but semantically poor suggestion. Suggestions still require review; OS certification is pending.
@@ -14,10 +16,10 @@ See [context.md](context.md) for the report-derived phase checklist, implementat
 
 ## Requirements
 
-- Python 3 with `venv` and `pip`; the extension declares Python 3.10 or newer. The developer machine currently has Python 3.14.2; the full Python/OS support range has not yet been certified.
-- Node.js 20.9 or newer and npm are required for the local companion. The developer Mac has Node.js 24.11.1 and npm 11.6.2.
+- Python with `venv` and `pip`. The developer machine currently has Python 3.14.2; the project's minimum supported Python version has not yet been certified.
+- Node.js and npm are needed to develop/build the frontend extension. The developer Mac has Node.js 24.11.1 and npm 11.6.2.
 - macOS or Windows for the first local companion target. Linux packaging is a later, explicitly tested target.
-- Ollama is optional for local AI explanations. The manifest records a recommended model, and explicit user approval is required before the app triggers a local `ollama pull`.
+- Ollama is required for the optional local explanation path. The manifest records a recommended model, and explicit user approval is required before the app triggers a local `ollama pull`.
 
 ## Private beta setup for Windows and macOS
 

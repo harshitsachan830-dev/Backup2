@@ -1,6 +1,6 @@
 # Build Context
 
-Last updated: 2026-10-03
+Last updated: 2026-10-24
 
 ## Source of truth
 
@@ -170,3 +170,11 @@ Run these gates on each OS claimed as supported. Until then, describe macOS and 
 - Added pinned `jupyterlab_branding_extension==1.0.36` and project Jupyter config to use the supplied ModelMind logo for the main application and startup splash and to set the browser tab title to **ModelMind Notebook**.
 - The platform launchers and documented manual setup export `jupyter-config` through `JUPYTER_CONFIG_PATH`; the startup orbit elements are hidden by the frontend extension before plugin activation.
 - Verified the configured server extension loads, serves branding configuration, and displays the ModelMind browser title and logo in a live JupyterLab session. Extension build and unit tests pass on the developer Mac; cross-platform startup remains unverified.
+
+## 2026-10-24 preprocessing explanation update
+
+- Updated the ML Studio preprocessing advisor's **Why** text to use observed numeric skewness, IQR-flagged outliers, discrete/count-like values, categorical cardinality, and missing-value counts when explaining its existing recommendation.
+- The explanations state trade-offs and uncertainty: observed CSV statistics do not identify the cause of missingness or prove an imputation method is unbiased. Mode and ordinal-encoding trade-offs are described, and ordinal encoding is not presented as meaningful unless the categories have a real order.
+- Numeric identifier warnings now require an ID-like column name; high uniqueness alone is not enough to label a measurement column as an identifier.
+- Medium-level explanations disclose when the existing example clips IQR outliers and caution that an IQR flag does not establish a data error. The Basic, Medium, and Advanced generated code paths were intentionally left unchanged.
+- Verified the active `Backup2/extensions/error-assistant` advisor against the preprocessing stress-test CSV and ran the focused advisor and preview tests: 6 passed. Python syntax checks passed; this is not a full platform or cross-OS certification.

@@ -83,32 +83,39 @@ async function waitForService(name, isRunning, timeoutMs) {
   throw new Error(`${name} did not become ready before the startup timeout.`);
 }
 
-async function readLocalOriginSetting() {
-  if (process.env.MODELMIND_WEB_ORIGINS) {
-    return process.env.MODELMIND_WEB_ORIGINS;
+async function readLocalOriginSetting(includeLocalDashboard = false) {
+  let configuredOrigins = process.env.MODELMIND_WEB_ORIGINS;
+  if (!configuredOrigins) {
+    try {
+      const envFile = await readFile(
+        resolve(repositoryDirectory, ".env"),
+        "utf8",
+      );
+      for (const line of envFile.split(/\r?\n/)) {
+        const match = line.match(/^\s*MODELMIND_WEB_ORIGINS\s*=\s*(.*?)\s*$/);
+        if (match) {
+          configuredOrigins = match[1].replace(/^(['"])(.*)\1$/, "$2").trim();
+          break;
+        }
+      }
+    } catch (error) {
+      if (error.code !== "ENOENT") {
+        throw error;
+      }
+    }
   }
 
-  try {
-    const envFile = await readFile(
-      resolve(repositoryDirectory, ".env"),
-      "utf8",
-    );
-    for (const line of envFile.split(/\r?\n/)) {
-      const match = line.match(/^\s*MODELMIND_WEB_ORIGINS\s*=\s*(.*?)\s*$/);
-      if (!match) {
-        continue;
-      }
-      const value = match[1].replace(/^(['"])(.*)\1$/, "$2").trim();
-      if (value) {
-        return value;
-      }
-    }
-  } catch (error) {
-    if (error.code !== "ENOENT") {
-      throw error;
-    }
+  const origins = new Set(
+    (configuredOrigins ?? "")
+      .split(",")
+      .map(origin => origin.trim())
+      .filter(Boolean),
+  );
+  if (includeLocalDashboard) {
+    origins.add("http://localhost:3000");
+    origins.add("http://127.0.0.1:3000");
   }
-  return undefined;
+  return origins.size > 0 ? [...origins].join(",") : undefined;
 }
 
 function startChild(command, args, options) {
@@ -247,7 +254,7 @@ try {
 
       if (uvicornAvailable) {
         try {
-          const localOrigins = await readLocalOriginSetting();
+          const localOrigins = await readLocalOriginSetting(runWebsite);
           console.log(`Starting the local ModelMind API at ${apiUrl}.`);
           startChild(
             pythonExecutable,

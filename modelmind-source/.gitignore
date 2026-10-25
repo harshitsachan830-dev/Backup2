@@ -58,3 +58,6 @@ components.zip
 lib.zip
 # ModelMind local secrets
 backend/.modelmind/
+
+# Never commit local deployment credentials.
+/.env.local

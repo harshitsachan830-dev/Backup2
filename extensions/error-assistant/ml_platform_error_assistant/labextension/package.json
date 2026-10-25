@@ -48,6 +48,7 @@
     "@jupyterlab/application": "4.6.1",
     "@jupyterlab/cells": "4.6.1",
     "@jupyterlab/coreutils": "6.6.1",
+    "@jupyterlab/docmanager": "4.6.1",
     "@jupyterlab/mainmenu": "4.6.1",
     "@jupyterlab/nbformat": "4.6.1",
     "@jupyterlab/notebook": "4.6.1",
@@ -108,7 +109,7 @@
     "extension": true,
     "outputDir": "ml_platform_error_assistant/labextension",
     "_build": {
-      "load": "static/remoteEntry.3133d63aa3044092.js",
+      "load": "static/remoteEntry.d5ec9c3826e2af8c.js",
       "extension": "./extension",
       "style": "./style"
     }

@@ -48,6 +48,7 @@
         "@jupyterlab/application": "4.6.1",
         "@jupyterlab/cells": "4.6.1",
         "@jupyterlab/coreutils": "6.6.1",
+        "@jupyterlab/docmanager": "4.6.1",
         "@jupyterlab/mainmenu": "4.6.1",
         "@jupyterlab/nbformat": "4.6.1",
         "@jupyterlab/notebook": "4.6.1",

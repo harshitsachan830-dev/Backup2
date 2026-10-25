@@ -1,10 +1,16 @@
+import json
+import http.cookiejar
 import os
 import secrets
 import time
+import urllib.error
+import urllib.request
 from pathlib import Path
-from urllib.parse import urlencode, urlsplit, urlunsplit
+from typing import Literal
+from urllib.parse import quote, urlencode, urlsplit, urlunsplit
 
 from fastapi import (
+    Body,
     FastAPI,
     File,
     HTTPException,
@@ -51,7 +57,8 @@ app = FastAPI(
     title="ModelMind Backend",
     version="0.3.0",
 )
-pending_jupyter_launches: dict[str, float] = {}
+NotebookType = Literal["modelmind", "trainer"]
+pending_jupyter_launches: dict[str, tuple[float, NotebookType | None]] = {}
 
 try:
     jupyter_port = int(os.environ.get("MODELMIND_JUPYTER_PORT", "8899"))
@@ -193,7 +200,10 @@ def health():
 
 
 @app.post("/jupyter/prepare")
-def prepare_jupyter(request: Request):
+def prepare_jupyter(
+    request: Request,
+    notebook_type: NotebookType | None = Body(default=None, embed=True),
+):
     if request.headers.get("origin") not in allowed_web_origins:
         return JSONResponse(
             status_code=403,
@@ -206,16 +216,168 @@ def prepare_jupyter(request: Request):
             del pending_jupyter_launches[launch_id]
 
     launch_id = secrets.token_urlsafe(32)
-    pending_jupyter_launches[launch_id] = now + 60
+    pending_jupyter_launches[launch_id] = (now + 60, notebook_type)
     return {"launch_id": launch_id}
+
+
+def _load_jupyter_xsrf_token(
+    opener,
+    cookie_jar: http.cookiejar.CookieJar,
+    lab_url: str,
+    headers: dict[str, str],
+) -> str:
+    try:
+        request = urllib.request.Request(lab_url, headers=headers)
+        with opener.open(request, timeout=5):
+            pass
+    except (OSError, urllib.error.HTTPError) as error:
+        raise RuntimeError(
+            "Could not initialize a secure request to the notebook server."
+        ) from error
+
+    xsrf_cookie = next(
+        (cookie.value for cookie in cookie_jar if cookie.name == "_xsrf"),
+        None,
+    )
+    if not xsrf_cookie:
+        raise RuntimeError(
+            "The notebook server did not provide its required XSRF cookie."
+        )
+    return xsrf_cookie
+
+
+def _ensure_jupyter_notebook(server: dict, notebook_type: NotebookType) -> str:
+    filename = (
+        "Trainer-Notebook.ipynb"
+        if notebook_type == "trainer"
+        else "ModelMind-Notebook.ipynb"
+    )
+    title = "Trainer Notebook" if notebook_type == "trainer" else "ModelMind Notebook"
+    intro = (
+        "Use ModelMind Studio to preview generated code, then write and run "
+        "your own solution in the cells below."
+        if notebook_type == "trainer"
+        else "Use the full ModelMind ML Studio workflow to prepare data and build models."
+    )
+
+    server_url = server.get("url")
+    if not isinstance(server_url, str):
+        raise RuntimeError("The local notebook server URL is unavailable.")
+    parsed_url = urlsplit(server_url)
+    try:
+        port = int(server.get("port", parsed_url.port or 0))
+    except (TypeError, ValueError) as error:
+        raise RuntimeError("The local notebook server port is invalid.") from error
+
+    base_url = server.get("base_url")
+    if not isinstance(base_url, str) or not base_url.startswith("/"):
+        base_url = parsed_url.path or "/"
+    content_url = (
+        f"http://127.0.0.1:{port}{base_url.rstrip('/')}/api/contents/"
+        f"{quote(filename)}"
+    )
+    lab_url = f"http://127.0.0.1:{port}{base_url.rstrip('/')}/lab/"
+    token = server.get("token")
+    headers = {"Content-Type": "application/json"}
+    if isinstance(token, str) and token:
+        headers["Authorization"] = f"token {token}"
+
+    cookie_jar = http.cookiejar.CookieJar()
+    opener = urllib.request.build_opener(
+        urllib.request.HTTPCookieProcessor(cookie_jar)
+    )
+    headers["X-XSRFToken"] = _load_jupyter_xsrf_token(
+        opener, cookie_jar, lab_url, headers
+    )
+
+    try:
+        request = urllib.request.Request(
+            f"{content_url}?content=1",
+            headers=headers,
+            method="GET",
+        )
+        with opener.open(request, timeout=5) as response:
+            document = json.loads(response.read())
+    except urllib.error.HTTPError as error:
+        if error.code != 404:
+            raise RuntimeError(
+                f"Could not inspect {filename} in the notebook workspace."
+            ) from error
+        document = None
+    except (OSError, json.JSONDecodeError) as error:
+        raise RuntimeError(
+            f"Could not inspect {filename} in the notebook workspace."
+        ) from error
+
+    if document is None:
+        needs_update = True
+        notebook_content = {
+            "cells": [
+                {
+                    "cell_type": "markdown",
+                    "metadata": {},
+                    "source": f"# {title}\n\n{intro}",
+                },
+                {
+                    "cell_type": "code",
+                    "execution_count": None,
+                    "metadata": {},
+                    "outputs": [],
+                    "source": "",
+                },
+            ],
+            "metadata": {"modelmind_notebook_type": notebook_type},
+            "nbformat": 4,
+            "nbformat_minor": 5,
+        }
+        payload = {
+            "type": "notebook",
+            "format": "json",
+            "content": notebook_content,
+        }
+    else:
+        notebook_content = document.get("content")
+        if not isinstance(notebook_content, dict):
+            raise RuntimeError(f"{filename} is not a readable notebook.")
+        metadata = notebook_content.setdefault("metadata", {})
+        if not isinstance(metadata, dict):
+            raise RuntimeError(f"{filename} has invalid notebook metadata.")
+        needs_update = metadata.get("modelmind_notebook_type") != notebook_type
+        if needs_update:
+            metadata["modelmind_notebook_type"] = notebook_type
+        payload = {
+            "type": "notebook",
+            "format": "json",
+            "content": notebook_content,
+        }
+
+    if needs_update:
+        try:
+            put_request = urllib.request.Request(
+                content_url,
+                data=json.dumps(payload).encode("utf-8"),
+                headers=headers,
+                method="PUT",
+            )
+            with opener.open(put_request, timeout=5):
+                pass
+        except urllib.error.HTTPError as error:
+            if not (document is None and error.code == 409):
+                raise RuntimeError(f"Could not prepare {filename}.") from error
+        except OSError as error:
+            raise RuntimeError(f"Could not prepare {filename}.") from error
+
+    return filename
 
 
 @app.get("/jupyter/open")
 def open_jupyter(
     request: Request,
     launch_id: str | None = Query(default=None, max_length=128),
+    notebook_type: NotebookType | None = Query(default=None),
 ):
     valid_request = False
+    selected_notebook_type = notebook_type
     if launch_id is not None:
         if len(launch_id) < 32:
             return HTMLResponse(
@@ -226,9 +388,10 @@ def open_jupyter(
                     "<p>Return to ModelMind and choose Open Notebook again.</p></body></html>"
                 ),
             )
-        expires_at = pending_jupyter_launches.pop(launch_id, None)
-        if expires_at is not None and expires_at > time.monotonic():
+        launch = pending_jupyter_launches.pop(launch_id, None)
+        if launch is not None and launch[0] > time.monotonic():
             valid_request = True
+            selected_notebook_type = launch[1]
         else:
             return HTMLResponse(
                 status_code=403,
@@ -305,6 +468,25 @@ def open_jupyter(
             if not isinstance(base_url, str) or not base_url.startswith("/"):
                 base_url = parsed_url.path or "/"
             lab_path = f"{base_url.rstrip('/')}/lab/"
+            if selected_notebook_type is not None:
+                try:
+                    notebook_filename = _ensure_jupyter_notebook(
+                        server, selected_notebook_type
+                    )
+                except RuntimeError as error:
+                    return HTMLResponse(
+                        status_code=503,
+                        content=(
+                            "<!doctype html><html><head><title>Could not open notebook</title>"
+                            "</head><body><h1>Could not open notebook</h1>"
+                            f"<p>{error}</p><p>Return to ModelMind and try again.</p>"
+                            "</body></html>"
+                        ),
+                    )
+                lab_path = (
+                    f"{base_url.rstrip('/')}/lab/tree/"
+                    f"{quote(notebook_filename)}"
+                )
 
             # Build the redirect URL. When token is a non-empty string, pass
             # it as a query parameter. When token is empty / None and password
