@@ -37,7 +37,7 @@ export const visualizations: VisualizationItem[] = [
   },
   {
     name: "Decision Tree",
-    href: "https://decision-tree-studio.onrender.com/",
+    href: "https://decision-tree-final.onrender.com/",
     kind: "tree",
     category: "Classification",
     description: "Watch the tree grow and understand how depth and split rules change complexity.",
