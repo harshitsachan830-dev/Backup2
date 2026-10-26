@@ -2,6 +2,12 @@
 
 <!-- <START NEW CHANGELOG ENTRY> -->
 
+## 0.1.2
+
+- Explain measured model recommendations using the selected target, class balance, CV scores, fold variation, sample size, screening, and preprocessing evidence.
+- Clarify close model rankings and validation limits without presenting the top result as a guarantee.
+- Keep cloud fallback disabled by default unless the user explicitly enables it.
+
 ## 0.1.1
 
 - Recognize numeric measurements stored as text in preprocessing advice and previews.

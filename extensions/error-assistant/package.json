@@ -1,6 +1,6 @@
 {
     "name": "@ml-platform/error-assistant",
-    "version": "0.1.1",
+    "version": "0.1.2",
     "description": "JupyterLab error assistant frontend and server extension",
     "keywords": [
         "jupyter",

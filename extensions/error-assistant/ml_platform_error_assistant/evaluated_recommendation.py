@@ -28,7 +28,7 @@ from .automl_result_adapter import build_automl_recommendations
 from .automl_code_adapter import attach_automl_code
 from .model_recommender import recommend_models
 from .preprocessing_validator import validate_preprocessing
-from .pipeline_builder import build_model_pipeline
+from .pipeline_builder import build_model_pipeline, inspect_feature_types
 
 
 def _choose_cv_folds(
@@ -198,6 +198,41 @@ def recommend_models_evaluated(
             task=resolved_task,
             cv_folds=folds,
         )
+
+        # Keep the explanation tied to the actual data and evaluation
+        # protocol. The evaluator may intentionally use a bounded sample;
+        # expose both the available and evaluated row counts to the UI.
+        usable = frame.loc[frame[target_column].notna()]
+        feature_types = inspect_feature_types(
+            usable,
+            selected_features,
+        )
+        empirical["target_column"] = target_column
+        empirical["rows_available"] = int(len(usable))
+        empirical["rows_total"] = int(len(frame))
+        empirical["rows_excluded_missing_target"] = int(
+            len(frame) - len(usable)
+        )
+        empirical["numeric_feature_count"] = len(
+            feature_types["numeric"]
+        )
+        empirical["categorical_feature_count"] = len(
+            feature_types["categorical"]
+        )
+        empirical["feature_missing_count"] = int(
+            usable[selected_features].isna().sum().sum()
+        )
+
+        if resolved_task == "classification":
+            counts = usable[target_column].value_counts(dropna=True)
+            empirical["class_distribution"] = [
+                {
+                    "label": str(label),
+                    "count": int(count),
+                    "share": float(count / len(usable)),
+                }
+                for label, count in counts.items()
+            ]
 
         result = dict(legacy)
 

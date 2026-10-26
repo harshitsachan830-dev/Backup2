@@ -124,6 +124,7 @@ def build_automl_recommendations(
             "metric": metric,
             "measured_score": item["mean_score"],
             "std_score": item.get("std_score"),
+            "fold_scores": item.get("fold_scores", []),
             "scaler": item.get("scaler", "none"),
             "cv_folds": evaluation.get("cv_folds"),
             "screening_score": (
@@ -199,7 +200,28 @@ def build_automl_recommendations(
         "screening_folds": evaluation.get(
             "screening_folds",
         ),
+        "screening_rows": evaluation.get("screening_rows"),
         "cv_folds": evaluation.get("cv_folds"),
+        "rows_available": evaluation.get("rows_available"),
+        "rows_total": evaluation.get("rows_total"),
+        "rows_evaluated": evaluation.get("rows_evaluated"),
+        "rows_excluded_missing_target": evaluation.get(
+            "rows_excluded_missing_target"
+        ),
+        "target_column": evaluation.get("target_column"),
+        "class_distribution": evaluation.get(
+            "class_distribution", []
+        ),
+        "numeric_feature_count": evaluation.get(
+            "numeric_feature_count"
+        ),
+        "categorical_feature_count": evaluation.get(
+            "categorical_feature_count"
+        ),
+        "feature_missing_count": evaluation.get(
+            "feature_missing_count"
+        ),
+        "warnings": evaluation.get("warnings", []),
         "note": (
             "Final ranks use measured cross-validation "
             "performance among successfully evaluated "

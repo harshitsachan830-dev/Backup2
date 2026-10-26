@@ -2046,8 +2046,9 @@ export class ModelMindStudioWidget extends Widget {
     hdr.innerHTML = `
       <div class="mm-studio-sec-title"><span>🤖</span> Intelligent Model Advisor</div>
       <div class="mm-studio-sec-sub">
-        ModelMind analyses your dataset's size, feature types, and missing values
-        to recommend the best ML models — ranked by suitability score.
+        Choose the target you want to predict. ModelMind screens model candidates,
+        then compares the finalists with cross-validation. Each model's Why section
+        shows the measured evidence, how it fits the data, and what the score cannot prove.
       </div>
     `;
 
@@ -2096,8 +2097,8 @@ export class ModelMindStudioWidget extends Widget {
       'font-size:11px;color:#64748b;line-height:1.6;margin-bottom:10px;';
     evaluationDescription.textContent =
       'Run real 3-fold cross-validation on your selected dataset. ' +
-      'These measured scores are different from the suitability scores ' +
-      'shown in the original recommendations below.';
+      'The score is measured on validation folds; the top-ranked model is not ' +
+      'a guarantee for new data, and screened-out models are not fully compared.';
 
     const evaluationControls = document.createElement('div');
     evaluationControls.style.cssText =
@@ -2628,16 +2629,40 @@ export class ModelMindStudioWidget extends Widget {
                 const rank = Number.isInteger(item.rank)
                   ? item.rank
                   : index + 1;
+                const comparisonItem = rank === 1
+                  ? automl.recommendations.find(
+                      (candidate: any) => candidate.rank === 2
+                    )
+                  : automl.recommendations.find(
+                      (candidate: any) => candidate.rank === 1
+                    );
                 const explanation = buildMeasuredModelExplanation({
                   name: String(item.name),
                   task: automl.task,
                   metric: String(item.metric ?? automl.metric ?? 'CV score'),
                   score: item.measured_score,
                   scoreStd: item.std_score,
+                  comparisonName: comparisonItem?.name,
+                  comparisonScore: comparisonItem?.measured_score,
+                  comparisonStd: comparisonItem?.std_score,
                   rank,
                   finalistCount: automl.recommendations.length,
                   candidateCount: automl.candidate_count,
-                  cvFolds: item.cv_folds ?? automl.cv_folds
+                  cvFolds: item.cv_folds ?? automl.cv_folds,
+                  screeningFolds: automl.screening_folds,
+                  screeningRows: automl.screening_rows,
+                  rowsAvailable: automl.rows_available,
+                  rowsTotal: automl.rows_total,
+                  rowsEvaluated: automl.rows_evaluated,
+                  rowsExcludedMissingTarget:
+                    automl.rows_excluded_missing_target,
+                  targetColumn: automl.target_column ?? original.target_column,
+                  classDistribution: automl.class_distribution,
+                  numericFeatureCount: automl.numeric_feature_count,
+                  categoricalFeatureCount: automl.categorical_feature_count,
+                  featureMissingCount: automl.feature_missing_count,
+                  scaler: item.scaler,
+                  warnings: automl.warnings
                 });
 
                 return {
@@ -2654,6 +2679,8 @@ export class ModelMindStudioWidget extends Widget {
                       : 'Classification'
                   ],
                   why: explanation.why,
+                  why_evidence: explanation.evidence,
+                  why_confidence: explanation.confidence,
                   strengths: explanation.strengths,
                   weaknesses: explanation.weaknesses,
                   best_for: explanation.bestFor,
@@ -3574,10 +3601,49 @@ export class ModelMindStudioWidget extends Widget {
     // ── Why recommended ──
     const whyEl = document.createElement('div');
     whyEl.style.cssText = `
-      font-size:11.5px; padding:10px 12px; border-radius:8px; margin-bottom:10px;
-      background:#f0fdf4; border:1px solid #bbf7d0; color:#14532d; line-height:1.6; font-weight:500;
+      font-size:11.5px; padding:12px 14px; border-radius:8px; margin-bottom:10px;
+      background:#f0fdf4; border:1px solid #bbf7d0; color:#14532d; line-height:1.65; font-weight:500;
     `;
-    whyEl.innerHTML = `<b style="color:#15803d; font-weight:700;">✅ Why this model:</b> <span style="color:#166534;">${model.why}</span>`;
+    const whyHeading = document.createElement('div');
+    whyHeading.textContent = '✅ Why this model';
+    whyHeading.style.cssText =
+      'color:#15803d;font-weight:800;font-size:12px;margin-bottom:4px;';
+    const whySummary = document.createElement('div');
+    whySummary.textContent = String(model.why ?? '');
+    whySummary.style.color = '#166534';
+    whyEl.append(whyHeading, whySummary);
+
+    if (
+      model.automl_measured &&
+      Array.isArray(model.why_evidence) &&
+      model.why_evidence.length > 0
+    ) {
+      const evidenceHeading = document.createElement('div');
+      evidenceHeading.textContent = 'What supports this recommendation';
+      evidenceHeading.style.cssText =
+        'font-weight:750;margin-top:9px;margin-bottom:3px;color:#14532d;';
+      const evidenceList = document.createElement('ul');
+      evidenceList.style.cssText =
+        'margin:0;padding-left:18px;color:#166534;';
+
+      for (const item of model.why_evidence) {
+        const evidenceItem = document.createElement('li');
+        evidenceItem.textContent = String(item);
+        evidenceItem.style.marginTop = '3px';
+        evidenceList.appendChild(evidenceItem);
+      }
+
+      whyEl.append(evidenceHeading, evidenceList);
+
+      if (typeof model.why_confidence === 'string' && model.why_confidence) {
+        const confidence = document.createElement('div');
+        confidence.textContent = `How to interpret it: ${model.why_confidence}`;
+        confidence.style.cssText =
+          'margin-top:9px;padding-top:7px;border-top:1px solid #bbf7d0;font-weight:600;';
+        whyEl.appendChild(confidence);
+      }
+    }
+
     card.appendChild(whyEl);
     // ModelMind: optional ML dependency availability.
     // Keep model rank, score, code actions and existing UI unchanged.

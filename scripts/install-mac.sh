@@ -50,7 +50,7 @@ esac
 printf "→ Fetching latest release info... "
 LATEST_TAG="$(curl -fsSL "https://api.github.com/repos/${REPO}/releases" 2>/dev/null | grep '"tag_name":' | head -n 1 | sed -E 's/.*"([^"]+)".*/\1/' || true)"
 if [[ -z "$LATEST_TAG" ]]; then
-  LATEST_TAG="private-companion-v0.2.4"
+  LATEST_TAG="private-companion-v0.2.5"
 fi
 printf "${COLOR_GREEN}%s${COLOR_RESET}\n" "$LATEST_TAG"
 

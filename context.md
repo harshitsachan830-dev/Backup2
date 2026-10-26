@@ -2,9 +2,9 @@
 
 Last updated: 2026-10-26
 
-## Version 0.2.4
+## Version 0.2.5
 
-This release incorporates the numeric-text preprocessing improvement: conservative detection of measurement columns, separate reporting of blank and unparseable cells, and consistent handling across recommendations, previews, and generated preprocessing code. The private companion installer workflow builds all supported macOS and Windows assets for the `private-companion-v0.2.4` tag.
+This release improves Model Advisor explanations. Each recommendation explains the model family, measured score, target balance, evaluation sample, candidate screening, fold variation, and preprocessing steps. Close rankings are described as uncertain and the UI recommends an independent final validation. Gemini fallback is disabled by default and requires explicit opt-in. The private companion installer workflow builds all supported macOS and Windows assets for the `private-companion-v0.2.5` tag.
 
 ## Source of truth
 
