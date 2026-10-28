@@ -28,7 +28,7 @@ export default function JupyterWorkspace() {
             className="jupyterLaunchButton jupyterTrainerLaunchButton"
             notebookType="trainer"
           >
-            Open Trainer Notebook <span aria-hidden="true">↗</span>
+            User&apos;s Notebook <span aria-hidden="true">↗</span>
           </OpenJupyterForm>
         </div>
         <a

@@ -34,7 +34,7 @@ Write-Host "-> System Architecture: 64-bit Windows detected" -ForegroundColor Gr
 
 # 2. Get latest release
 Write-Host "-> Fetching latest release info from GitHub... " -NoNewline
-$latestTag = "private-companion-v0.2.5"
+$latestTag = "private-companion-v0.2.6"
 try {
     $releaseData = Invoke-RestMethod -Uri "https://api.github.com/repos/$repo/releases" -UseBasicParsing -ErrorAction SilentlyContinue
     if ($releaseData -and $releaseData.Count -gt 0) {

@@ -1,6 +1,7 @@
 export interface VisualizationItem {
   name: string;
   href?: string;
+  docsHref: string;
   kind: string;
   category: string;
   description: string;
@@ -10,6 +11,7 @@ export const visualizations: VisualizationItem[] = [
   {
     name: "PCA",
     href: "https://pca-matrix-studio.onrender.com/",
+    docsHref: "https://scikit-learn.org/stable/modules/generated/sklearn.decomposition.PCA.html",
     kind: "scatter",
     category: "Dimensionality reduction",
     description: "Explore dimensionality reduction and project data into principal components.",
@@ -17,6 +19,7 @@ export const visualizations: VisualizationItem[] = [
   {
     name: "K-Means",
     href: "https://k-means-o9np.onrender.com/",
+    docsHref: "https://scikit-learn.org/stable/modules/generated/sklearn.cluster.KMeans.html",
     kind: "clusters",
     category: "Clustering",
     description: "Experiment with cluster assignments and centroid-based grouping.",
@@ -24,6 +27,7 @@ export const visualizations: VisualizationItem[] = [
   {
     name: "Random Forest",
     href: "https://random-forest-t8mf.onrender.com/",
+    docsHref: "https://scikit-learn.org/stable/modules/generated/sklearn.ensemble.RandomForestClassifier.html",
     kind: "tree",
     category: "Classification",
     description: "Explore how an ensemble of decision trees makes predictions.",
@@ -31,6 +35,7 @@ export const visualizations: VisualizationItem[] = [
   {
     name: "XGBoost",
     href: "https://xgboost-y5q7.onrender.com/",
+    docsHref: "https://xgboost.readthedocs.io/en/stable/tutorials/model.html",
     kind: "bars",
     category: "Boosting",
     description: "Inspect boosted-tree behavior and feature importance.",
@@ -38,6 +43,7 @@ export const visualizations: VisualizationItem[] = [
   {
     name: "Decision Tree",
     href: "https://decision-tree-final.onrender.com/",
+    docsHref: "https://scikit-learn.org/stable/modules/generated/sklearn.tree.DecisionTreeClassifier.html",
     kind: "tree",
     category: "Classification",
     description: "Watch the tree grow and understand how depth and split rules change complexity.",
@@ -45,6 +51,7 @@ export const visualizations: VisualizationItem[] = [
   {
     name: "Perceptron",
     href: "https://all-visualizations.onrender.com/",
+    docsHref: "https://scikit-learn.org/stable/modules/generated/sklearn.linear_model.Perceptron.html",
     kind: "network",
     category: "Classification",
     description: "Explore how a perceptron learns a linear decision boundary from examples.",
@@ -52,6 +59,7 @@ export const visualizations: VisualizationItem[] = [
   {
     name: "Gradient Boosting",
     href: "https://gradient-boosting-frontend.onrender.com/",
+    docsHref: "https://scikit-learn.org/stable/modules/generated/sklearn.ensemble.GradientBoostingClassifier.html",
     kind: "lines",
     category: "Classification",
     description: "See weak learners sequentially correct errors made by previous learners.",
@@ -59,6 +67,7 @@ export const visualizations: VisualizationItem[] = [
   {
     name: "Multi-Layer Perceptron",
     href: "https://mlp-5svl.onrender.com/",
+    docsHref: "https://scikit-learn.org/stable/modules/neural_networks_supervised.html",
     kind: "network",
     category: "Deep learning",
     description: "Explore connections and information flow through a neural network.",
@@ -66,6 +75,7 @@ export const visualizations: VisualizationItem[] = [
   {
     name: "Gradient Descent",
     href: "https://modelmind-gradient-descent-static-2026.onrender.com",
+    docsHref: "https://developers.google.com/machine-learning/crash-course/linear-regression/gradient-descent",
     kind: "lines",
     category: "Optimization",
     description: "Watch a linear regression model learn by updating weight and bias step by step.",
@@ -73,6 +83,7 @@ export const visualizations: VisualizationItem[] = [
   {
     name: "Linear Regression",
     href: "https://modelmind-linear-regression.onrender.com/",
+    docsHref: "https://scikit-learn.org/stable/modules/generated/sklearn.linear_model.LinearRegression.html",
     kind: "lines",
     category: "Regression",
     description: "Explore a fitted line, model parameters, and predictions for numerical data.",
@@ -80,6 +91,7 @@ export const visualizations: VisualizationItem[] = [
   {
     name: "Multiple Linear Regression",
     href: "https://modelmind-multiple-linear-regression-7ehl.onrender.com/",
+    docsHref: "https://scikit-learn.org/stable/modules/generated/sklearn.linear_model.LinearRegression.html",
     kind: "lines",
     category: "Regression",
     description: "Explore how multiple input features contribute to a numerical prediction.",
@@ -87,6 +99,7 @@ export const visualizations: VisualizationItem[] = [
   {
     name: "Logistic Regression",
     href: "https://modelmind-logistic-regression-lab.onrender.com/",
+    docsHref: "https://scikit-learn.org/stable/modules/linear_model.html#logistic-regression",
     kind: "lines",
     category: "Classification",
     description: "Explore logistic probabilities, classification thresholds, and model behavior.",
@@ -94,6 +107,7 @@ export const visualizations: VisualizationItem[] = [
   {
     name: "Multiclass Logistic Regression",
     href: "https://multiclass-logistic-regression.onrender.com/",
+    docsHref: "https://scikit-learn.org/stable/modules/linear_model.html#logistic-regression",
     kind: "lines",
     category: "Classification",
     description: "Explore how logistic regression separates data across multiple classes.",
@@ -101,6 +115,7 @@ export const visualizations: VisualizationItem[] = [
   {
     name: "K-Nearest Neighbors",
     href: "https://modelmind-knn-lab.onrender.com",
+    docsHref: "https://scikit-learn.org/stable/modules/neighbors.html#nearest-neighbors-classification",
     kind: "clusters",
     category: "Classification",
     description: "See neighborhoods, voting, and decision boundaries change as K changes.",
@@ -108,6 +123,7 @@ export const visualizations: VisualizationItem[] = [
   {
     name: "Support Vector Machine",
     href: "https://modelmind-svm.onrender.com/",
+    docsHref: "https://scikit-learn.org/stable/modules/svm.html",
     kind: "scatter",
     category: "Classification",
     description: "Explore support vectors, margins, and nonlinear decision boundaries.",
@@ -115,6 +131,7 @@ export const visualizations: VisualizationItem[] = [
   {
     name: "Naive Bayes",
     href: "https://modelmind-naive-bayes.onrender.com/",
+    docsHref: "https://scikit-learn.org/stable/modules/naive_bayes.html",
     kind: "bars",
     category: "Classification",
     description: "Explore class distributions and how probabilities create predictions.",
@@ -122,6 +139,7 @@ export const visualizations: VisualizationItem[] = [
   {
     name: "CatBoost",
     href: "https://catboost-lab.onrender.com/",
+    docsHref: "https://catboost.ai/docs/en/concepts/algorithm-main-stages",
     kind: "bars",
     category: "Boosting",
     description: "Explore CatBoost predictions and gradient-boosted decision trees.",
@@ -129,6 +147,7 @@ export const visualizations: VisualizationItem[] = [
   {
     name: "LightGBM",
     href: "https://lightgbm-viz.onrender.com",
+    docsHref: "https://lightgbm.readthedocs.io/en/stable/Features.html",
     kind: "bars",
     category: "Boosting",
     description: "Explore LightGBM and its efficient gradient-boosted tree learning.",
@@ -136,6 +155,7 @@ export const visualizations: VisualizationItem[] = [
   {
     name: "Regularization",
     href: "https://modelmind-regularization.onrender.com",
+    docsHref: "https://scikit-learn.org/stable/modules/linear_model.html#ridge-regression-and-classification",
     kind: "Model fitting",
     category: "Model fitting",
     description: "Explore how regularization controls model complexity and overfitting.",
@@ -143,6 +163,7 @@ export const visualizations: VisualizationItem[] = [
   {
     name: "Polynomial Regression",
     href: "https://modelmind-polynomial-lab-2026.onrender.com",
+    docsHref: "https://scikit-learn.org/stable/modules/generated/sklearn.preprocessing.PolynomialFeatures.html",
     kind: "lines",
     category: "Regression",
     description: "Explore polynomial curves and how model degree changes the fit.",
@@ -150,6 +171,7 @@ export const visualizations: VisualizationItem[] = [
   {
     name: "AdaBoost",
     href: "https://modelmind-adaboost.onrender.com",
+    docsHref: "https://scikit-learn.org/stable/modules/generated/sklearn.ensemble.AdaBoostClassifier.html",
     kind: "bars",
     category: "Classification",
     description: "Watch incorrectly classified samples gain importance across learners.",
@@ -157,6 +179,7 @@ export const visualizations: VisualizationItem[] = [
   {
     name: "Voting and Stacking",
     href: "https://modelmind-voting-stacking.onrender.com",
+    docsHref: "https://scikit-learn.org/stable/modules/ensemble.html",
     kind: "tree",
     category: "Ensemble",
     description: "Explore voting and stacking ensembles combining diverse base estimators.",
@@ -164,6 +187,7 @@ export const visualizations: VisualizationItem[] = [
   {
     name: "Ensemble Lab",
     href: "https://modelmind-ensemble-lab-2026.onrender.com",
+    docsHref: "https://scikit-learn.org/stable/modules/ensemble.html",
     kind: "tree",
     category: "Ensemble",
     description: "Interactive ensemble laboratory for comparing bagging, boosting, and voting.",
@@ -171,6 +195,7 @@ export const visualizations: VisualizationItem[] = [
   {
     name: "Bagging Lab",
     href: "https://modelmind-bagging-studio-2026.onrender.com",
+    docsHref: "https://scikit-learn.org/stable/modules/generated/sklearn.ensemble.BaggingClassifier.html",
     kind: "tree",
     category: "Ensemble",
     description: "Explore bootstrap aggregating (bagging) and variance reduction across estimators.",
@@ -178,6 +203,7 @@ export const visualizations: VisualizationItem[] = [
   {
     name: "Boosting",
     href: "https://modelmind-boosting-frontend.onrender.com/",
+    docsHref: "https://scikit-learn.org/stable/modules/ensemble.html",
     kind: "lines",
     category: "Boosting",
     description: "Explore sequential learning and error correction across boosted stages.",

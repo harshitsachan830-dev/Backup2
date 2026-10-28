@@ -2,9 +2,9 @@
 
 Last updated: 2026-10-26
 
-## Version 0.2.5
+## Version 0.2.6
 
-This release improves Model Advisor explanations. Each recommendation explains the model family, measured score, target balance, evaluation sample, candidate screening, fold variation, and preprocessing steps. Close rankings are described as uncertain and the UI recommends an independent final validation. Gemini fallback is disabled by default and requires explicit opt-in. The private companion installer workflow builds all supported macOS and Windows assets for the `private-companion-v0.2.5` tag.
+This release updates the ModelMind web workspace with a browsable dataset library, a documentation library for ML learning resources and visualization guides, and expanded project management with editable descriptions/status and per-owner API updates. The private companion installer workflow builds all supported macOS and Windows assets for the `private-companion-v0.2.6` tag.
 
 ## Source of truth
 

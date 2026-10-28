@@ -21,7 +21,7 @@ export async function GET() {
     }
     const { data, error } = await getSupabaseAdminClient()
       .from("projects")
-      .select("id, name, updated_at")
+      .select("id, name, created_at, updated_at, project_data")
       .eq("user_id", user.supabaseUserId)
       .order("updated_at", { ascending: false });
     if (error) {
@@ -60,16 +60,20 @@ export async function POST(request: NextRequest) {
   } catch {
     return NextResponse.json({ error: "Enter a project name." }, { status: 400 });
   }
-  const name =
-    typeof payload === "object" &&
-    payload !== null &&
-    "name" in payload &&
-    typeof payload.name === "string"
-      ? payload.name.trim()
-      : "";
+  const record = typeof payload === "object" && payload !== null
+    ? payload as Record<string, unknown>
+    : {};
+  const name = typeof record.name === "string" ? record.name.trim() : "";
+  const description = typeof record.description === "string" ? record.description.trim() : "";
   if (!name || name.length > 120) {
     return NextResponse.json(
       { error: "Project names must contain between 1 and 120 characters." },
+      { status: 400 },
+    );
+  }
+  if (description.length > 1000) {
+    return NextResponse.json(
+      { error: "Project descriptions must be 1000 characters or fewer." },
       { status: 400 },
     );
   }
@@ -83,7 +87,7 @@ export async function POST(request: NextRequest) {
     }
     const { error } = await getSupabaseAdminClient().from("projects").insert({
       name,
-      project_data: {},
+      project_data: { description, status: "Planning" },
       user_id: user.supabaseUserId,
     });
     if (error) {

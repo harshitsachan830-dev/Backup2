@@ -11,13 +11,6 @@ interface DashboardProps {
   isAdmin: boolean;
   demoAccessExpiresAt: string | null;
 }
-
-interface ComingSoonProps {
-  icon: string;
-  title: string;
-  description: string;
-}
-
 export default function Dashboard({
   userEmail,
   isAdmin,
@@ -66,6 +59,7 @@ export default function Dashboard({
       activeWorkspace === "VideoGPT" ||
       activeWorkspace === "Roadmap" ||
       activeWorkspace === "Dashboard" ||
+      activeWorkspace === "Datasets" ||
       activeWorkspace === "Projects" ||
       activeWorkspace === "Community" ||
       activeWorkspace === "Documentation"
@@ -84,15 +78,6 @@ export default function Dashboard({
           section="Visualizations"
           onWorkspaceChange={setActiveWorkspace}
           userEmail={userEmail}
-        />
-      );
-    }
-    if (activeWorkspace === "Datasets") {
-      return (
-        <ComingSoon
-          icon="◫"
-          title="Datasets"
-          description="Dataset management will be available here. Dataset upload remains inside the notebook."
         />
       );
     }
@@ -122,17 +107,5 @@ export default function Dashboard({
         <div className="workspace workspaceSingle">{renderWorkspace()}</div>
       </section>
     </main>
-  );
-}
-
-function ComingSoon({ icon, title, description }: ComingSoonProps) {
-  return (
-    <div className="comingSoon">
-      <div>
-        <div className="comingSoonIcon">{icon}</div>
-        <h2>{title}</h2>
-        <p>{description}</p>
-      </div>
-    </div>
   );
 }

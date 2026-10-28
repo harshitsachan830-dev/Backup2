@@ -3,6 +3,7 @@
 import { useState } from "react";
 
 import ProjectsWorkspace from "@/components/projects/ProjectsWorkspace";
+import DocumentationLibrary from "@/components/documentation/DocumentationLibrary";
 import OpenJupyterForm from "@/components/notebook/OpenJupyterForm";
 import EmbeddedLabViewer from "@/components/visualization/EmbeddedLabViewer";
 import { visualizations } from "@/lib/visualizations";
@@ -12,6 +13,107 @@ import type { Workspace } from "./Sidebar";
 const ROADMAP_URL =
   "https://modelmind-personalized.divyanshmaheshwari617.workers.dev/";
 const VIDEOGPT_URL = "https://video-analysis-amber-pi.vercel.app/";
+
+const datasetFilters = ["All", "Classification", "Regression", "Clustering", "Time series"] as const;
+
+const datasets = [
+  {
+    name: "Iris",
+    description: "A small, clean first dataset for learning classification and plotting class boundaries.",
+    tasks: ["Classification"],
+    level: "Beginner",
+    source: "UCI Repository",
+    href: "https://archive.ics.uci.edu/dataset/53/iris",
+  },
+  {
+    name: "Titanic: Machine Learning from Disaster",
+    description: "Predict passenger survival from a mix of numeric and categorical features.",
+    tasks: ["Classification"],
+    level: "Beginner",
+    source: "Kaggle",
+    href: "https://www.kaggle.com/competitions/titanic",
+  },
+  {
+    name: "Breast Cancer Wisconsin (Diagnostic)",
+    description: "Binary classification from numeric measurements; a useful model comparison dataset.",
+    tasks: ["Classification"],
+    level: "Beginner",
+    source: "UCI Repository",
+    href: "https://archive.ics.uci.edu/dataset/17/breast+cancer+wisconsin+diagnostic",
+  },
+  {
+    name: "Adult Census Income",
+    description: "Predict an income category from census features; includes categorical fields and missing values.",
+    tasks: ["Classification"],
+    level: "Practice preprocessing",
+    source: "UCI Repository",
+    href: "https://archive.ics.uci.edu/dataset/2/adult",
+  },
+  {
+    name: "Bank Marketing",
+    description: "Predict whether a client subscribes to a term deposit after a marketing campaign.",
+    tasks: ["Classification"],
+    level: "Practice preprocessing",
+    source: "UCI Repository",
+    href: "https://archive.ics.uci.edu/dataset/222/bank+marketing",
+  },
+  {
+    name: "Credit Approval",
+    description: "A compact classification dataset with mixed feature types and missing values.",
+    tasks: ["Classification"],
+    level: "Practice preprocessing",
+    source: "UCI Repository",
+    href: "https://archive.ics.uci.edu/dataset/27/credit+approval",
+  },
+  {
+    name: "Heart Disease",
+    description: "A classic classification exercise with mixed features and missing values.",
+    tasks: ["Classification"],
+    level: "Practice preprocessing",
+    source: "UCI Repository",
+    href: "https://archive.ics.uci.edu/dataset/45/heart+disease",
+  },
+  {
+    name: "Student Performance",
+    description: "Explore student records and predict final grades as a regression or classification task.",
+    tasks: ["Classification", "Regression"],
+    level: "Beginner",
+    source: "UCI Repository",
+    href: "https://archive.ics.uci.edu/dataset/320/student+performance",
+  },
+  {
+    name: "Wine Quality",
+    description: "Estimate wine quality from lab measurements; try both score prediction and quality groups.",
+    tasks: ["Classification", "Regression"],
+    level: "Beginner",
+    source: "UCI Repository",
+    href: "https://archive.ics.uci.edu/dataset/186/wine+quality",
+  },
+  {
+    name: "California Housing",
+    description: "A classic regression dataset for estimating district-level home values from census features.",
+    tasks: ["Regression"],
+    level: "Beginner",
+    source: "scikit-learn",
+    href: "https://scikit-learn.org/stable/modules/generated/sklearn.datasets.fetch_california_housing.html",
+  },
+  {
+    name: "Bike Sharing",
+    description: "Predict bike rental counts from weather, season, and calendar features.",
+    tasks: ["Regression", "Time series"],
+    level: "Intermediate",
+    source: "UCI Repository",
+    href: "https://archive.ics.uci.edu/dataset/275/bike+sharing+dataset",
+  },
+  {
+    name: "Online Retail",
+    description: "Analyze more than 500,000 transactions for customer grouping and retail patterns.",
+    tasks: ["Clustering", "Time series"],
+    level: "Intermediate",
+    source: "UCI Repository",
+    href: "https://archive.ics.uci.edu/dataset/352/online+retail",
+  },
+];
 
 const roadmaps = [
   {
@@ -332,7 +434,7 @@ export default function PortalSections({
                   className="referenceSecondaryLink"
                   notebookType="trainer"
                 >
-                  Open Trainer Notebook <ArrowIcon />
+                  User&apos;s Notebook <ArrowIcon />
                 </OpenJupyterForm>
               </div>
             }
@@ -403,11 +505,17 @@ export default function PortalSections({
     return <ProjectsWorkspace />;
   }
 
-  if (section === "Datasets" || section === "Community" || section === "Documentation") {
+  if (section === "Datasets") {
+    return <DatasetLibrary />;
+  }
+
+  if (section === "Documentation") {
+    return <DocumentationLibrary />;
+  }
+
+  if (section === "Community") {
     const descriptions: Record<string, string> = {
-      Datasets: "Organize and explore datasets for your machine-learning projects.",
       Community: "Connect with other learners and share what you build.",
-      Documentation: "Guides and references to help you get the most out of ModelMind.",
     };
     return (
       <main className="referencePage">
@@ -428,9 +536,73 @@ export default function PortalSections({
   );
 }
 
+function DatasetLibrary() {
+  const [activeFilter, setActiveFilter] = useState<(typeof datasetFilters)[number]>("All");
+  const visibleDatasets = datasets.filter(
+    (dataset) => activeFilter === "All" || dataset.tasks.includes(activeFilter),
+  );
+
+  return (
+    <main className="referencePage">
+      <section className="referencePanel referenceDatasets">
+        <SectionHeading
+          tone="datasets"
+          icon="◫"
+          title="Dataset Library"
+          description="Start a ModelMind project with trusted datasets for common machine-learning tasks."
+          action={
+            <ExternalLink className="datasetBrowseLink" href="https://archive.ics.uci.edu/datasets">
+              Browse UCI datasets <ArrowIcon />
+            </ExternalLink>
+          }
+        />
+        <div className="datasetFilters" role="group" aria-label="Filter datasets by task">
+          {datasetFilters.map((filter) => (
+            <button
+              aria-pressed={activeFilter === filter}
+              className={activeFilter === filter ? "active" : ""}
+              key={filter}
+              onClick={() => setActiveFilter(filter)}
+              type="button"
+            >
+              {filter}
+            </button>
+          ))}
+        </div>
+        <div className="datasetGrid">
+          {visibleDatasets.map((dataset) => (
+            <ExternalLink className="datasetCard" href={dataset.href} key={dataset.name}>
+              <span className="datasetCardTop">
+                <span className="datasetSource">{dataset.source}</span>
+                <span className="datasetArrow" aria-hidden="true"><ArrowIcon /></span>
+              </span>
+              <strong>{dataset.name}</strong>
+              <small>{dataset.description}</small>
+              <span className="datasetTags">
+                {dataset.tasks.map((task) => <span key={task}>{task}</span>)}
+                <span>{dataset.level}</span>
+              </span>
+            </ExternalLink>
+          ))}
+        </div>
+        <p className="datasetLibraryNote">
+          Links open the provider’s dataset page, where you can review its details and download files. Kaggle may require an account to download competition data. Upload downloaded CSV files in your notebook.
+        </p>
+      </section>
+    </main>
+  );
+}
+
 function VideoGPT() {
-  const [prompt, setPrompt] = useState("");
-  const [mode, setMode] = useState("Explain Concept");
+  const features = [
+    { icon: "▤", title: "Full Summary", description: "Get a clear summary of the complete video.", tone: "summary" },
+    { icon: "◷", title: "Ask by Timestamp", description: "Jump to the moment behind your question.", tone: "timestamp" },
+    { icon: "✦", title: "Key Concepts", description: "Pull out important ideas and formulas.", tone: "concepts" },
+    { icon: "✓", title: "Generate Quiz", description: "Practice with questions based on the video.", tone: "quiz" },
+    { icon: "▧", title: "Smart Notes", description: "Review chapter-by-chapter study notes.", tone: "notes" },
+  ];
+  const sections = ["Dashboard", "My Videos", "AI Chat", "Notes & Summaries", "Quizzes", "Flashcards", "Mind Maps", "Bookmarks", "Analytics"];
+
   return (
     <main className="referencePage">
       <section className="referencePanel referenceVideo">
@@ -438,32 +610,50 @@ function VideoGPT() {
           tone="video"
           icon="▶"
           title="VideoGPT"
-          description="Turn your questions into easy-to-understand video explanations."
-          action={<ExternalLink className="referenceViewAll" href={VIDEOGPT_URL}>Try VideoGPT <ArrowIcon /></ExternalLink>}
+          description="Learn from YouTube videos with summaries, timestamped answers, quizzes, and study notes."
+          action={<ExternalLink className="referenceViewAll" href={VIDEOGPT_URL}>Open VideoGPT <ArrowIcon /></ExternalLink>}
         />
-        <div className="referenceVideoGrid">
-          <div className="referenceVideoPrompt">
-            <label className="srOnly" htmlFor="video-prompt">Video topic or question</label>
-            <textarea
-              id="video-prompt"
-              value={prompt}
-              onChange={(event) => setPrompt(event.target.value)}
-              placeholder="Ask anything... (e.g. Explain PCA, How does a decision tree work, etc.)"
-            />
-            <div>
-              <label className="referenceModeLabel" htmlFor="video-mode">▣
-                <select id="video-mode" value={mode} onChange={(event) => setMode(event.target.value)}>
-                  <option>Explain Concept</option>
-                  <option>Summarize a Video</option>
-                  <option>Answer a Question</option>
-                </select>
-              </label>
-              <ExternalLink className="referenceGenerateLink" href={VIDEOGPT_URL}>Generate Video <ArrowIcon /></ExternalLink>
+        <div className="referenceVideoWorkspace" aria-label="Preview of the VideoGPT learning dashboard">
+          <aside className="referenceVideoSidebar" aria-label="VideoGPT navigation preview">
+            <div className="referenceVideoBrand"><span>▶</span><div><strong>VideoGPT</strong><small>Understand. Learn. Master.</small></div></div>
+            <nav>
+              {sections.map((section, index) => (
+                <div className={index === 0 ? "active" : ""} key={section}>
+                  <span aria-hidden="true">{["⌂", "▣", "▱", "▤", "☷", "▧", "⌘", "♧", "▥"][index]}</span>{section}
+                </div>
+              ))}
+            </nav>
+            <div className="referenceVideoProfile"><span>H</span><div><strong>Your learning space</strong><small>Videos, notes & progress</small></div></div>
+          </aside>
+
+          <div className="referenceVideoMain">
+            <div className="referenceVideoWelcome"><small>YOUR VIDEO LEARNING WORKSPACE</small><h2>What do you want to learn today?</h2></div>
+            <div className="referenceVideoAnalyze">
+              <strong><span aria-hidden="true">＋</span> Paste a YouTube link to get started</strong>
+              <div className="referenceVideoUrlBar"><span>↗</span><span>Paste a YouTube video URL</span><ExternalLink href={VIDEOGPT_URL}>Analyze video <ArrowIcon /></ExternalLink></div>
+              <div className="referenceVideoExamples"><span>Try these examples</span><div><b>🚀 System Design</b><b>🐍 Python</b><b>🧠 Machine Learning</b></div></div>
+            </div>
+            <div className="referenceVideoFeatures" aria-label="VideoGPT learning tools">
+              {features.map((feature) => (
+                <article className={`referenceVideoFeature ${feature.tone}`} key={feature.title}>
+                  <span aria-hidden="true">{feature.icon}</span><strong>{feature.title}</strong><small>{feature.description}</small><i aria-hidden="true">→</i>
+                </article>
+              ))}
+            </div>
+            <div className="referenceVideoBottom">
+              <div className="referenceVideoTopics">
+                <div><strong>Learn from videos you choose</strong><small>Paste a link to turn a lesson, talk, or tutorial into a study session.</small></div>
+                <div className="referenceVideoTopicTiles"><span>VIDEO SUMMARY</span><span>KEY TAKEAWAYS</span><span>STUDY NOTES</span></div>
+              </div>
+              <div className="referenceVideoStudyCard"><span aria-hidden="true">✦</span><strong>Keep learning in one place</strong><small>Revisit videos, ask follow-up questions, and review what you learned.</small><ExternalLink href={VIDEOGPT_URL}>Explore VideoGPT <ArrowIcon /></ExternalLink></div>
             </div>
           </div>
-          <ExternalLink className="referenceVideoPreview" href={VIDEOGPT_URL} aria-label="Open VideoGPT">
-            <span><b>▶</b></span>
-          </ExternalLink>
+
+          <aside className="referenceVideoRightRail" aria-label="VideoGPT feature overview">
+            <div className="referenceVideoOverview"><strong>🎯 Your Learning Overview</strong><div><span><b>▣</b><strong>Video library</strong><small>Keep analyzed videos together</small></span><span><b>◌</b><strong>Ask questions</strong><small>Get answers from a video</small></span><span><b>✓</b><strong>Practice</strong><small>Quizzes and flashcards</small></span><span><b>▤</b><strong>Review</strong><small>Notes and key moments</small></span></div></div>
+            <div className="referenceVideoContinue"><strong>Continue Learning</strong><div className="referenceVideoProgressArt"><span>▶</span><i><b /></i></div><small>Your video, notes, and progress stay together.</small><ExternalLink href={VIDEOGPT_URL}>Open your workspace <ArrowIcon /></ExternalLink></div>
+            <div className="referenceVideoAsk"><strong>🔥 Ask anything</strong><small>Ask about a moment, a concept, or a detail from the video.</small><div><span>What happened at this point?</span><b>→</b></div></div>
+          </aside>
         </div>
       </section>
     </main>
