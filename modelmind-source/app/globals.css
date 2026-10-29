@@ -2113,6 +2113,29 @@ button {
   background: #242033;
 }
 
+.appShell[data-theme="dark"] .datasetIntro { border-color: #393149; background: linear-gradient(110deg, #1a1724, #211b32); }
+.appShell[data-theme="dark"] .datasetIntroCopy > span,
+.appShell[data-theme="dark"] .datasetCardAction { color: #c2b2ff; }
+.appShell[data-theme="dark"] .datasetIntroCopy p,
+.appShell[data-theme="dark"] .datasetStats span,
+.appShell[data-theme="dark"] .datasetResultHeading span { color: var(--dashboard-muted); }
+.appShell[data-theme="dark"] .datasetStats strong,
+.appShell[data-theme="dark"] .datasetResultHeading strong,
+.appShell[data-theme="dark"] .datasetCard > strong,
+.appShell[data-theme="dark"] .datasetEmptyState strong { color: var(--dashboard-text); }
+.appShell[data-theme="dark"] .datasetStats > div { border-color: var(--dashboard-border); }
+.appShell[data-theme="dark"] .datasetSearch,
+.appShell[data-theme="dark"] .datasetEmptyState,
+.appShell[data-theme="dark"] .datasetEmptyState button { border-color: var(--dashboard-border); color: var(--dashboard-text); background: var(--dashboard-surface); }
+.appShell[data-theme="dark"] .datasetSearch input { color: var(--dashboard-text); }
+.appShell[data-theme="dark"] .datasetSearch input::placeholder,
+.appShell[data-theme="dark"] .datasetEmptyState p { color: var(--dashboard-muted); }
+.appShell[data-theme="dark"] .datasetGlyph { color: #d0c2ff; background: #352b57; }
+.appShell[data-theme="dark"] .datasetGlyph.regression { color: #77ddb5; background: #17392f; }
+.appShell[data-theme="dark"] .datasetGlyph.clustering { color: #f3bc65; background: #40321d; }
+.appShell[data-theme="dark"] .datasetGlyph.time-series { color: #87b9ff; background: #1d3048; }
+.appShell[data-theme="dark"] .datasetLibraryNote { border-color: var(--dashboard-border); }
+
 .appShell[data-theme="dark"] .datasetFilters button.active {
   border-color: #8063f5;
   color: #fff;
@@ -4397,8 +4420,8 @@ button {
 }
 
 .referenceDatasets {
-  --panel-tint: #f6f3ff;
-  --panel-border: #d8cef8;
+  --panel-tint: #f8f5ff;
+  --panel-border: #ddd3fb;
 }
 
 .referenceDatasets .referenceHeadingIcon {
@@ -4406,16 +4429,45 @@ button {
   background: linear-gradient(135deg, #7753f7, #9a5bf4);
 }
 
+.referenceDatasets .referenceHeading { margin-bottom: 18px; }
+
+.datasetIntro {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 22px;
+  margin-bottom: 18px;
+  padding: 15px 18px;
+  border: 1px solid #e7defd;
+  border-radius: 14px;
+  background: linear-gradient(110deg, #fff 0%, #f5f0ff 100%);
+}
+
+.datasetIntroCopy { min-width: 0; }
+.datasetIntroCopy > span { display: flex; align-items: center; gap: 7px; color: #5742c6; font-size: 11px; font-weight: 800; }
+.datasetIntroCopy > span svg { color: #8b5cf6; }
+.datasetIntroCopy p { margin: 6px 0 0; color: #77718b; font-size: 10px; line-height: 1.5; }
+
+.datasetStats { display: flex; flex: none; align-items: center; gap: 0; }
+.datasetStats > div { display: grid; gap: 3px; min-width: 86px; padding: 0 14px; border-left: 1px solid #e5def5; }
+.datasetStats strong { color: #392977; font-size: 17px; line-height: 1; }
+.datasetStats span { color: #827b94; font-size: 8px; font-weight: 700; white-space: nowrap; }
+
+.datasetToolbar { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-bottom: 17px; }
+
 .datasetFilters {
   display: flex;
   flex-wrap: wrap;
-  gap: 7px;
-  margin: 0 0 14px;
+  gap: 6px;
+  margin: 0;
 }
 
 .datasetFilters button {
-  min-height: 29px;
-  padding: 0 11px;
+  display: inline-flex;
+  min-height: 32px;
+  align-items: center;
+  gap: 7px;
+  padding: 0 10px;
   border: 1px solid #e5e0f2;
   border-radius: 999px;
   color: #6f6987;
@@ -4432,21 +4484,35 @@ button {
   background: #7453ef;
 }
 
+.datasetFilters button > span { display: grid; min-width: 17px; height: 17px; place-items: center; padding: 0 4px; border-radius: 999px; color: #79728b; background: #f2eff8; font-size: 8px; }
+.datasetFilters button.active > span { color: #fff; background: rgba(255,255,255,.22); }
+
+.datasetSearch { display: flex; width: min(100%, 260px); min-height: 35px; flex: 0 1 260px; align-items: center; gap: 8px; padding: 0 10px; border: 1px solid #e5e0f2; border-radius: 9px; color: #827c96; background: #fff; }
+.datasetSearch:focus-within { border-color: #9b83f5; box-shadow: 0 0 0 3px rgba(116,83,239,.1); }
+.datasetSearch input { width: 100%; min-width: 0; padding: 0; border: 0; outline: 0; color: #30284b; background: transparent; font: inherit; font-size: 9px; }
+.datasetSearch input::placeholder { color: #9a94aa; }
+.datasetSearch button { display: grid; flex: none; place-items: center; padding: 4px; border: 0; border-radius: 5px; color: #746b91; background: transparent; cursor: pointer; }
+.datasetSearch button:hover { background: #f1edfc; }
+
+.datasetResultHeading { display: flex; align-items: baseline; gap: 8px; margin: 0 0 9px; }
+.datasetResultHeading strong { color: #332957; font-size: 11px; }
+.datasetResultHeading span { color: #8b849f; font-size: 9px; }
+
 .datasetGrid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 10px;
+  gap: 12px;
 }
 
 .datasetCard {
   display: flex;
   min-width: 0;
-  min-height: 150px;
+  min-height: 188px;
   flex-direction: column;
   align-items: flex-start;
-  padding: 13px;
+  padding: 15px;
   border: 1px solid #e7e2f5;
-  border-radius: 12px;
+  border-radius: 14px;
   color: #211c3a;
   background: #fff;
   text-decoration: none;
@@ -4454,22 +4520,29 @@ button {
 }
 
 .datasetCard:hover {
-  transform: translateY(-2px);
-  border-color: #c9b9ff;
-  box-shadow: 0 7px 18px rgba(90, 70, 170, .1);
+  transform: translateY(-3px);
+  border-color: #b9a5fa;
+  box-shadow: 0 12px 26px rgba(90, 70, 170, .13);
 }
+
+.datasetCard:focus-visible { outline: 3px solid rgba(116,83,239,.42); outline-offset: 3px; }
 
 .datasetCardTop {
   display: flex;
   width: 100%;
   align-items: center;
-  justify-content: space-between;
-  margin-bottom: 8px;
+  gap: 8px;
+  margin-bottom: 13px;
 }
 
+.datasetGlyph { display: grid; width: 36px; height: 36px; flex: none; place-items: center; border-radius: 11px; color: #7053dc; background: #f0ebff; }
+.datasetGlyph.regression { color: #0b9b70; background: #e7f8f0; }
+.datasetGlyph.clustering { color: #d5810d; background: #fff3df; }
+.datasetGlyph.time-series { color: #2774d5; background: #eaf2ff; }
+
 .datasetSource {
-  padding: 4px 7px;
-  border-radius: 6px;
+  padding: 5px 8px;
+  border-radius: 7px;
   color: #6847dc;
   background: #f0ebff;
   font-size: 8px;
@@ -4478,8 +4551,9 @@ button {
 
 .datasetArrow {
   display: grid;
-  width: 22px;
-  height: 22px;
+  width: 28px;
+  height: 28px;
+  margin-left: auto;
   place-items: center;
   border-radius: 50%;
   color: #fff;
@@ -4498,16 +4572,17 @@ button {
 }
 
 .datasetCard > strong {
-  margin-bottom: 5px;
-  font-size: 11px;
+  margin-bottom: 6px;
+  color: #241d40;
+  font-size: 13px;
   font-weight: 800;
   line-height: 1.35;
 }
 
 .datasetCard > small {
   color: var(--dashboard-muted);
-  font-size: 9px;
-  line-height: 1.5;
+  font-size: 10px;
+  line-height: 1.55;
 }
 
 .datasetTags {
@@ -4515,17 +4590,27 @@ button {
   flex-wrap: wrap;
   gap: 5px;
   margin-top: auto;
-  padding-top: 9px;
+  padding-top: 12px;
 }
 
 .datasetTags > span {
-  padding: 4px 6px;
-  border-radius: 5px;
+  padding: 5px 7px;
+  border-radius: 6px;
   color: #706b83;
   background: #f2f0f8;
-  font-size: 7px;
+  font-size: 8px;
   font-weight: 700;
 }
+
+.datasetCardAction { display: flex; align-items: center; gap: 5px; margin-top: 12px; color: #6a4de0; font-size: 9px; font-weight: 800; }
+.datasetCard:hover .datasetCardAction svg { transform: translate(2px, -2px); }
+.datasetCardAction svg { transition: transform .16s ease; }
+
+.datasetEmptyState { display: grid; min-height: 215px; justify-items: center; align-content: center; padding: 24px; border: 1px dashed #d8cffa; border-radius: 14px; text-align: center; background: rgba(255,255,255,.58); }
+.datasetEmptyState > span { display: grid; width: 42px; height: 42px; place-items: center; border-radius: 13px; color: #7558e9; background: #eee9ff; }
+.datasetEmptyState strong { margin-top: 12px; color: #30284b; font-size: 13px; }
+.datasetEmptyState p { max-width: 370px; margin: 6px 0 12px; color: #817a93; font-size: 10px; line-height: 1.5; }
+.datasetEmptyState button { padding: 7px 10px; border: 1px solid #d9cff8; border-radius: 8px; color: #5b43ca; background: #fff; font: inherit; font-size: 9px; font-weight: 800; cursor: pointer; }
 
 .datasetBrowseLink {
   display: inline-flex;
@@ -4545,11 +4630,17 @@ button {
 }
 
 .datasetLibraryNote {
-  margin: 12px 0 0;
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  margin: 15px 0 0;
+  padding-top: 12px;
+  border-top: 1px solid rgba(132, 115, 183, .15);
   color: var(--dashboard-muted);
   font-size: 9px;
   line-height: 1.5;
 }
+.datasetLibraryNote svg { flex: none; margin-top: 1px; color: #8a73e4; }
 
 .referenceHeading {
   display: flex;
@@ -5531,6 +5622,8 @@ button {
   .appShell .sidebar { width: 175px; min-width: 175px; }
   .referenceRoadmapGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .datasetGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .datasetToolbar { align-items: flex-start; flex-direction: column-reverse; }
+  .datasetSearch { width: 100%; max-width: none; flex: auto; }
   .referenceVisualizationGrid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
   .allVisualizationsGrid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
   .referenceVisualizationCard { height: 230px; }
@@ -5562,6 +5655,10 @@ button {
   .referenceVisualizationCard { height: 210px; }
   .referenceVideoGrid { gap: 14px; }
   .referenceVideoPreview { width: 90%; height: 165px; }
+  .datasetIntro { align-items: flex-start; flex-direction: column; gap: 14px; }
+  .datasetStats { width: 100%; justify-content: space-between; }
+  .datasetStats > div { min-width: 0; flex: 1; padding: 0 10px; }
+  .datasetStats > div:first-child { padding-left: 0; border-left: 0; }
 }
 
 @media (max-width: 430px) {
@@ -5575,6 +5672,11 @@ button {
   .referenceRoadmapGrid { grid-template-columns: 1fr; }
   .referenceRoadmapCard { min-height: 90px; }
   .datasetGrid { grid-template-columns: 1fr; }
+  .datasetToolbar { gap: 10px; }
+  .datasetFilters { width: 100%; gap: 5px; }
+  .datasetFilters button { min-height: 30px; padding: 0 8px; font-size: 8px; }
+  .datasetCard { min-height: 174px; }
+  .datasetStats span { font-size: 7px; }
   .referenceStats > div { padding: 0 6px; column-gap: 4px; }
   .referenceStats > div > span { font-size: 15px; }
   .referenceStats strong { font-size: 8px; }
@@ -6013,7 +6115,8 @@ button {
   display: flex;
   min-height: 100%;
   flex-direction: column;
-  gap: 22px;
+  gap: 27px;
+  padding: clamp(22px, 2vw, 34px);
   --panel-tint: #f7f4ff;
   --panel-border: #d9d0fa;
 }
@@ -6021,10 +6124,13 @@ button {
 .documentationHeading {
   display: flex;
   align-items: center;
-  gap: 13px;
+  gap: 16px;
+  min-height: 58px;
 }
 
 .documentationHeading .referenceHeadingIcon {
+  width: 52px;
+  height: 52px;
   flex: none;
   color: #fff;
   background: linear-gradient(135deg, #7453ef, #a256ed);
@@ -6033,34 +6139,34 @@ button {
 .documentationHeading h1 {
   margin: 0;
   color: var(--dashboard-text, #211c3a);
-  font-size: clamp(19px, 2vw, 26px);
+  font-size: clamp(25px, 2.25vw, 34px);
   font-weight: 800;
   letter-spacing: -.5px;
 }
 
 .documentationHeading p,
 .documentationSectionHeading p {
-  margin: 4px 0 0;
+  margin: 6px 0 0;
   color: var(--dashboard-muted, #77728e);
-  font-size: 11px;
-  line-height: 1.5;
+  font-size: 13px;
+  line-height: 1.55;
 }
 
 .documentationCount {
   margin-left: auto;
-  padding: 8px 10px;
+  padding: 10px 14px;
   border: 1px solid #e1d9fb;
   border-radius: 999px;
   color: #6847dc;
   background: #f4f0ff;
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 800;
   white-space: nowrap;
 }
 
 .documentationSection {
   display: grid;
-  gap: 11px;
+  gap: 14px;
 }
 
 .documentationSectionHeading {
@@ -6073,28 +6179,28 @@ button {
 .documentationSectionHeading h2 {
   margin: 0;
   color: var(--dashboard-text, #211c3a);
-  font-size: 15px;
+  font-size: 20px;
   font-weight: 800;
 }
 
 .documentationSectionHeading p {
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .mlResourceGrid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 9px;
+  gap: 12px;
 }
 
 .mlResourceCard {
   display: flex;
   min-width: 0;
-  min-height: 116px;
-  gap: 9px;
-  padding: 11px;
+  min-height: 146px;
+  gap: 12px;
+  padding: 16px;
   border: 1px solid var(--dashboard-border, #e7e2f5);
-  border-radius: 11px;
+  border-radius: 14px;
   color: var(--dashboard-text, #211c3a);
   background: var(--dashboard-surface, #fff);
   text-decoration: none;
@@ -6110,45 +6216,45 @@ button {
 
 .mlResourceIcon {
   display: grid;
-  width: 29px;
-  height: 29px;
+  width: 38px;
+  height: 38px;
   flex: none;
   place-items: center;
-  border-radius: 9px;
+  border-radius: 11px;
   color: #7149e8;
   background: #f0ebff;
-  font-size: 16px;
+  font-size: 19px;
 }
 
 .mlResourceCopy {
   display: grid;
   min-width: 0;
   align-content: start;
-  gap: 4px;
+  gap: 6px;
 }
 
 .mlResourceCopy small {
   color: #7453ef;
-  font-size: 8px;
+  font-size: 10px;
   font-weight: 800;
 }
 
 .mlResourceCopy strong {
-  font-size: 10px;
+  font-size: 13px;
   font-weight: 800;
   line-height: 1.35;
 }
 
 .mlResourceCopy > span {
   color: var(--dashboard-muted, #77728e);
-  font-size: 9px;
-  line-height: 1.4;
+  font-size: 11px;
+  line-height: 1.5;
 }
 
 .documentationArrow {
   margin-left: auto;
   color: #7453ef;
-  font-size: 12px;
+  line-height: 1;
 }
 
 .documentationVisualizationHeading {
@@ -6157,11 +6263,11 @@ button {
 
 .documentationSearch {
   display: flex;
-  width: min(250px, 40%);
-  min-height: 34px;
+  width: min(320px, 44%);
+  min-height: 42px;
   align-items: center;
-  gap: 7px;
-  padding: 0 9px;
+  gap: 9px;
+  padding: 0 12px;
   border: 1px solid var(--dashboard-border, #e7e2f5);
   border-radius: 8px;
   color: var(--dashboard-muted, #77728e);
@@ -6172,6 +6278,8 @@ button {
   font-size: 17px;
 }
 
+.documentationSearch > svg { flex: none; }
+
 .documentationSearch input {
   width: 100%;
   min-width: 0;
@@ -6180,8 +6288,15 @@ button {
   color: var(--dashboard-text, #211c3a);
   background: transparent;
   font: inherit;
-  font-size: 10px;
+  font-size: 12px;
 }
+
+.documentationSearch button { display: grid; flex: none; place-items: center; padding: 4px; border: 0; border-radius: 5px; color: var(--dashboard-muted); background: transparent; cursor: pointer; }
+.documentationSearch button:hover { background: #f1edfc; }
+
+.documentationResults { display: flex; align-items: baseline; gap: 9px; margin-top: -2px; }
+.documentationResults strong { color: var(--dashboard-text); font-size: 12px; }
+.documentationResults span { color: var(--dashboard-muted); font-size: 11px; }
 
 .documentationFilters {
   display: flex;
@@ -6190,17 +6305,23 @@ button {
 }
 
 .documentationFilters button {
-  min-height: 27px;
-  padding: 0 10px;
+  display: inline-flex;
+  min-height: 34px;
+  align-items: center;
+  gap: 7px;
+  padding: 0 12px;
   border: 1px solid var(--dashboard-border, #e7e2f5);
   border-radius: 999px;
   color: var(--dashboard-muted, #77728e);
   background: var(--dashboard-surface, #fff);
   font: inherit;
-  font-size: 8px;
+  font-size: 10px;
   font-weight: 700;
   cursor: pointer;
 }
+
+.documentationFilters button > span { display: grid; min-width: 18px; height: 18px; place-items: center; padding: 0 4px; border-radius: 999px; color: #7c758e; background: #f2eff8; font-size: 9px; }
+.documentationFilters button.active > span { color: #fff; background: rgba(255,255,255,.22); }
 
 .documentationFilters button.active {
   border-color: #7453ef;
@@ -6211,35 +6332,35 @@ button {
 .visualizationGuideGrid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 9px;
+  gap: 13px;
 }
 
 .visualizationGuideCard {
   display: flex;
   min-width: 0;
-  min-height: 148px;
+  min-height: 188px;
   flex-direction: column;
   align-items: flex-start;
-  padding: 11px;
+  padding: 16px;
   border: 1px solid var(--dashboard-border, #e7e2f5);
-  border-radius: 11px;
+  border-radius: 14px;
   background: var(--dashboard-surface, #fff);
   transition: transform .18s ease, border-color .18s ease, box-shadow .18s ease;
 }
 
 .visualizationGuideCategory {
-  padding: 4px 7px;
-  border-radius: 5px;
+  padding: 5px 8px;
+  border-radius: 6px;
   color: #6847dc;
   background: #f0ebff;
-  font-size: 8px;
+  font-size: 9px;
   font-weight: 800;
 }
 
 .visualizationGuideCard h3 {
-  margin: 8px 0 4px;
+  margin: 10px 0 6px;
   color: var(--dashboard-text, #211c3a);
-  font-size: 11px;
+  font-size: 15px;
   font-weight: 800;
   line-height: 1.35;
 }
@@ -6247,21 +6368,24 @@ button {
 .visualizationGuideCard p {
   margin: 0;
   color: var(--dashboard-muted, #77728e);
-  font-size: 9px;
-  line-height: 1.45;
+  font-size: 11px;
+  line-height: 1.55;
 }
 
 .visualizationGuideCard > div {
   display: flex;
   flex-wrap: wrap;
-  gap: 7px 12px;
+  gap: 8px 16px;
   margin-top: auto;
-  padding-top: 10px;
+  padding-top: 14px;
 }
 
 .visualizationGuideCard a {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
   color: #6847dc;
-  font-size: 9px;
+  font-size: 10px;
   font-weight: 800;
   text-decoration: none;
 }
@@ -6270,32 +6394,35 @@ button {
   text-decoration: underline;
 }
 
-.visualizationGuideCard a span {
-  margin-left: 2px;
-}
+.visualizationGuideCard a svg { transition: transform .16s ease; }
+.visualizationGuideCard a:hover svg { transform: translate(2px, -2px); }
 
 .documentationNote {
   margin: 0;
+  padding-top: 14px;
+  border-top: 1px solid rgba(132, 115, 183, .15);
   color: var(--dashboard-muted, #77728e);
-  font-size: 9px;
-  line-height: 1.5;
+  font-size: 11px;
+  line-height: 1.6;
 }
 
 .documentationNoResults {
   display: grid;
   justify-items: center;
-  gap: 7px;
-  padding: 28px 12px;
+  gap: 9px;
+  min-height: 220px;
+  align-content: center;
+  padding: 32px 16px;
   border: 1px dashed var(--dashboard-border, #e7e2f5);
   border-radius: 11px;
   color: var(--dashboard-muted, #77728e);
-  font-size: 10px;
+  font-size: 12px;
   text-align: center;
 }
 
 .documentationNoResults strong {
   color: var(--dashboard-text, #211c3a);
-  font-size: 12px;
+  font-size: 15px;
 }
 
 .documentationNoResults button {
@@ -6307,6 +6434,11 @@ button {
   font-weight: 800;
   cursor: pointer;
 }
+
+.mlResourceCard:focus-visible,
+.visualizationGuideCard a:focus-visible,
+.documentationFilters button:focus-visible,
+.documentationSearch input:focus-visible { outline: 3px solid rgba(116,83,239,.38); outline-offset: 3px; }
 
 .appShell[data-theme="dark"] .documentationCount,
 .appShell[data-theme="dark"] .mlResourceIcon,
@@ -6333,14 +6465,22 @@ button {
   background: #7453ef;
 }
 
+.appShell[data-theme="dark"] .documentationFilters button > span { color: var(--dashboard-muted); background: #242033; }
+.appShell[data-theme="dark"] .documentationFilters button.active > span { color: #fff; background: rgba(255,255,255,.22); }
+.appShell[data-theme="dark"] .documentationResults strong { color: var(--dashboard-text); }
+.appShell[data-theme="dark"] .documentationNote { border-color: var(--dashboard-border); }
+.appShell[data-theme="dark"] .documentationSearch button:hover { background: #242033; }
+
 @media (max-width: 1100px) {
   .mlResourceGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
 @media (max-width: 760px) {
   .visualizationGuideGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .documentationHeading { align-items: flex-start; }
-  .documentationCount { display: none; }
+  .documentationHeading { align-items: flex-start; flex-wrap: wrap; }
+  .documentationHeading > div { flex: 1; }
+  .documentationCount { margin-left: 68px; }
+  .documentationWorkspace { gap: 23px; padding: 20px; }
 }
 
 @media (max-width: 520px) {
@@ -6348,6 +6488,13 @@ button {
   .visualizationGuideGrid { grid-template-columns: 1fr; }
   .documentationVisualizationHeading { align-items: stretch; flex-direction: column; }
   .documentationSearch { width: 100%; }
+  .documentationHeading h1 { font-size: 24px; }
+  .documentationHeading p { font-size: 12px; }
+  .documentationSectionHeading h2 { font-size: 18px; }
+  .documentationWorkspace { gap: 20px; padding: 16px; }
+  .mlResourceCard { min-height: 130px; padding: 14px; }
+  .visualizationGuideCard { min-height: 172px; padding: 14px; }
+  .visualizationGuideCard h3 { font-size: 14px; }
 }
 
 /* Keep the app's desktop geometry in step with model-mind-dashboard.html. */

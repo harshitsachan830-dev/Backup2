@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
+import { ArrowUpRight, Database, Search, Sparkles, X } from "lucide-react";
 
 import ProjectsWorkspace from "@/components/projects/ProjectsWorkspace";
 import DocumentationLibrary from "@/components/documentation/DocumentationLibrary";
@@ -538,9 +539,18 @@ export default function PortalSections({
 
 function DatasetLibrary() {
   const [activeFilter, setActiveFilter] = useState<(typeof datasetFilters)[number]>("All");
-  const visibleDatasets = datasets.filter(
-    (dataset) => activeFilter === "All" || dataset.tasks.includes(activeFilter),
-  );
+  const [query, setQuery] = useState("");
+  const counts = useMemo(() => Object.fromEntries(
+    datasetFilters.map((filter) => [
+      filter,
+      filter === "All" ? datasets.length : datasets.filter((dataset) => dataset.tasks.includes(filter)).length,
+    ]),
+  ) as Record<(typeof datasetFilters)[number], number>, []);
+  const visibleDatasets = datasets.filter((dataset) => {
+    const matchesFilter = activeFilter === "All" || dataset.tasks.includes(activeFilter);
+    const searchable = `${dataset.name} ${dataset.description} ${dataset.source} ${dataset.level} ${dataset.tasks.join(" ")}`.toLowerCase();
+    return matchesFilter && searchable.includes(query.trim().toLowerCase());
+  });
 
   return (
     <main className="referencePage">
@@ -556,25 +566,54 @@ function DatasetLibrary() {
             </ExternalLink>
           }
         />
-        <div className="datasetFilters" role="group" aria-label="Filter datasets by task">
-          {datasetFilters.map((filter) => (
-            <button
-              aria-pressed={activeFilter === filter}
-              className={activeFilter === filter ? "active" : ""}
-              key={filter}
-              onClick={() => setActiveFilter(filter)}
-              type="button"
-            >
-              {filter}
-            </button>
-          ))}
+        <div className="datasetIntro">
+          <div className="datasetIntroCopy">
+            <span><Sparkles size={15} /> A good dataset makes a great first project</span>
+            <p>Choose a learning goal, explore a trusted source, then bring the downloaded file into your notebook.</p>
+          </div>
+          <div className="datasetStats" aria-label="Dataset library summary">
+            <div><strong>{datasets.length}</strong><span>curated datasets</span></div>
+            <div><strong>{datasetFilters.length - 1}</strong><span>ML task types</span></div>
+            <div><strong>{new Set(datasets.map((dataset) => dataset.source)).size}</strong><span>trusted sources</span></div>
+          </div>
         </div>
-        <div className="datasetGrid">
+        <div className="datasetToolbar">
+          <div className="datasetFilters" role="group" aria-label="Filter datasets by task">
+            {datasetFilters.map((filter) => (
+              <button
+                aria-pressed={activeFilter === filter}
+                className={activeFilter === filter ? "active" : ""}
+                key={filter}
+                onClick={() => setActiveFilter(filter)}
+                type="button"
+              >
+                {filter}<span>{counts[filter]}</span>
+              </button>
+            ))}
+          </div>
+          <div className="datasetSearch">
+            <Search size={16} aria-hidden="true" />
+            <input
+              aria-label="Search datasets by name, task, or source"
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Search datasets, tasks, or sources"
+              type="search"
+              value={query}
+            />
+            {query && <button type="button" aria-label="Clear search" onClick={() => setQuery("")}><X size={14} /></button>}
+          </div>
+        </div>
+        <div className="datasetResultHeading" aria-live="polite">
+          <strong>{visibleDatasets.length} {visibleDatasets.length === 1 ? "dataset" : "datasets"}</strong>
+          <span>{activeFilter === "All" ? "Explore the collection" : `${activeFilter} projects`}</span>
+        </div>
+        {visibleDatasets.length ? <div className="datasetGrid">
           {visibleDatasets.map((dataset) => (
             <ExternalLink className="datasetCard" href={dataset.href} key={dataset.name}>
               <span className="datasetCardTop">
+                <span className={`datasetGlyph ${dataset.tasks[0].toLowerCase().replace(" ", "-")}`}><Database size={19} aria-hidden="true" /></span>
                 <span className="datasetSource">{dataset.source}</span>
-                <span className="datasetArrow" aria-hidden="true"><ArrowIcon /></span>
+                <span className="datasetArrow" aria-hidden="true"><ArrowUpRight size={16} /></span>
               </span>
               <strong>{dataset.name}</strong>
               <small>{dataset.description}</small>
@@ -582,11 +621,17 @@ function DatasetLibrary() {
                 {dataset.tasks.map((task) => <span key={task}>{task}</span>)}
                 <span>{dataset.level}</span>
               </span>
+              <span className="datasetCardAction">Explore dataset <ArrowUpRight size={14} aria-hidden="true" /></span>
             </ExternalLink>
           ))}
-        </div>
+        </div> : <div className="datasetEmptyState">
+          <span><Search size={21} aria-hidden="true" /></span>
+          <strong>No datasets match your search</strong>
+          <p>Try another name, task, or source, or clear your filters to see the full collection.</p>
+          <button type="button" onClick={() => { setQuery(""); setActiveFilter("All"); }}>Clear search and filters</button>
+        </div>}
         <p className="datasetLibraryNote">
-          Links open the provider’s dataset page, where you can review its details and download files. Kaggle may require an account to download competition data. Upload downloaded CSV files in your notebook.
+          <Database size={14} aria-hidden="true" /> Links open the provider’s dataset page so you can review details and download files. Kaggle may require an account. Upload downloaded CSV files in your notebook.
         </p>
       </section>
     </main>

@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { ArrowUpRight, BookOpen, Search, X } from "lucide-react";
 
 import { visualizations } from "@/lib/visualizations";
 
@@ -77,12 +78,20 @@ export default function DocumentationLibrary() {
       return matchesCategory && matchesSearch;
     });
   }, [activeFilter, search]);
+  const filterCounts = useMemo(() => Object.fromEntries(
+    visualizationFilters.map((filter) => [
+      filter,
+      filter === "All visualizations"
+        ? visualizations.length
+        : visualizations.filter((item) => item.category === filter).length,
+    ]),
+  ) as Record<string, number>, []);
 
   return (
     <main className="referencePage">
       <section className="referencePanel documentationWorkspace">
         <header className="documentationHeading">
-          <span className="referenceHeadingIcon" aria-hidden="true">▤</span>
+          <span className="referenceHeadingIcon" aria-hidden="true"><BookOpen size={25} /></span>
           <div>
             <h1>Machine Learning Documentation</h1>
             <p>Trusted learning resources and official concept guides for every ModelMind visualization.</p>
@@ -106,7 +115,7 @@ export default function DocumentationLibrary() {
                   <strong>{resource.title}</strong>
                   <span>{resource.description}</span>
                 </span>
-                <span className="documentationArrow" aria-hidden="true">↗</span>
+              <span className="documentationArrow" aria-hidden="true"><ArrowUpRight size={18} /></span>
               </a>
             ))}
           </div>
@@ -118,11 +127,11 @@ export default function DocumentationLibrary() {
               <h2 id="visualization-guides-heading">Visualization guides</h2>
               <p>Each guide matches a visualization available in ModelMind.</p>
             </div>
-            <label className="documentationSearch">
-              <span aria-hidden="true">⌕</span>
-              <span className="srOnly">Search visualization guides</span>
-              <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search algorithms" type="search" />
-            </label>
+            <div className="documentationSearch">
+              <Search size={17} aria-hidden="true" />
+              <input aria-label="Search visualization guides" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search algorithms" type="search" />
+              {search && <button type="button" aria-label="Clear search" onClick={() => setSearch("")}><X size={15} /></button>}
+            </div>
           </div>
           <div className="documentationFilters" role="group" aria-label="Filter visualizations by category">
             {visualizationFilters.map((filter) => (
@@ -133,9 +142,13 @@ export default function DocumentationLibrary() {
                 onClick={() => setActiveFilter(filter)}
                 type="button"
               >
-                {filter}
+                {filter}<span>{filterCounts[filter]}</span>
               </button>
             ))}
+          </div>
+          <div className="documentationResults" aria-live="polite">
+            <strong>{visibleVisualizations.length} {visibleVisualizations.length === 1 ? "guide" : "guides"}</strong>
+            <span>{activeFilter === "All visualizations" ? "Browse every ModelMind visualization" : activeFilter}</span>
           </div>
           {visibleVisualizations.length > 0 ? (
             <div className="visualizationGuideGrid">
@@ -145,8 +158,8 @@ export default function DocumentationLibrary() {
                   <h3>{item.name}</h3>
                   <p>{item.description}</p>
                   <div>
-                    <a href={item.docsHref} rel="noopener noreferrer" target="_blank">Read concept guide <span aria-hidden="true">↗</span></a>
-                    {item.href && <a href={item.href} rel="noopener noreferrer" target="_blank">Open visualizer <span aria-hidden="true">↗</span></a>}
+                    <a href={item.docsHref} rel="noopener noreferrer" target="_blank">Read concept guide <ArrowUpRight size={14} aria-hidden="true" /></a>
+                    {item.href && <a href={item.href} rel="noopener noreferrer" target="_blank">Open visualizer <ArrowUpRight size={14} aria-hidden="true" /></a>}
                   </div>
                 </article>
               ))}
