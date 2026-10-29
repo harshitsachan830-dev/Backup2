@@ -2,7 +2,21 @@
 
 import { useEffect, useState } from "react";
 import { ArrowLeft, Maximize2, Minimize2, RotateCw, X } from "lucide-react";
+import { visualizations } from "@/lib/visualizations";
 import type { VisualizationItem } from "@/lib/visualizations";
+
+const trustedVisualizationUrls = new Set(
+  visualizations.flatMap((visualization) => visualization.href ? [new URL(visualization.href).href] : []),
+);
+
+function getTrustedVisualizationUrl(value: string) {
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" && trustedVisualizationUrls.has(url.href) ? url.href : null;
+  } catch {
+    return null;
+  }
+}
 
 interface EmbeddedLabViewerProps {
   lab: VisualizationItem | null;
@@ -28,9 +42,11 @@ export default function EmbeddedLabViewer({
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [lab, onClose]);
 
-  if (!lab || !lab.href) {
+  if (!lab) {
     return null;
   }
+
+  const trustedUrl = lab.href ? getTrustedVisualizationUrl(lab.href) : null;
 
   return (
     <div
@@ -53,7 +69,7 @@ export default function EmbeddedLabViewer({
             </button>
             <div className="mm-lab-divider" aria-hidden="true" />
             <div className="mm-lab-title-group">
-              <span className="mm-lab-badge">PROTECTED LAB</span>
+              <span className="mm-lab-badge">MODEL MIND VIEWER</span>
               <h2 className="mm-lab-title">{lab.name}</h2>
             </div>
           </div>
@@ -87,13 +103,23 @@ export default function EmbeddedLabViewer({
         </header>
 
         <div className="mm-lab-body">
-          <iframe
-            key={iframeKey}
-            src={lab.href}
-            title={lab.name}
-            className="mm-lab-iframe"
-            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-          />
+          {trustedUrl ? (
+            <iframe
+              key={iframeKey}
+              src={trustedUrl}
+              title={lab.name}
+              className="mm-lab-iframe"
+              sandbox="allow-forms allow-scripts allow-same-origin allow-downloads allow-pointer-lock allow-presentation"
+              referrerPolicy="no-referrer"
+              loading="lazy"
+              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+            />
+          ) : (
+            <div className="mm-lab-guard-message" role="alert">
+              <strong>Visualization blocked</strong>
+              <span>This destination is not on ModelMind’s trusted visualization list.</span>
+            </div>
+          )}
         </div>
       </div>
     </div>

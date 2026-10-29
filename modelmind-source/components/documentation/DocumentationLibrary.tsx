@@ -3,7 +3,9 @@
 import { useMemo, useState } from "react";
 import { ArrowUpRight, BookOpen, Search, X } from "lucide-react";
 
+import EmbeddedLabViewer from "@/components/visualization/EmbeddedLabViewer";
 import { visualizations } from "@/lib/visualizations";
+import type { VisualizationItem } from "@/lib/visualizations";
 
 const mlResources = [
   {
@@ -69,6 +71,7 @@ const visualizationFilters = ["All visualizations", ...new Set(visualizations.ma
 export default function DocumentationLibrary() {
   const [activeFilter, setActiveFilter] = useState("All visualizations");
   const [search, setSearch] = useState("");
+  const [activeLab, setActiveLab] = useState<VisualizationItem | null>(null);
 
   const visibleVisualizations = useMemo(() => {
     const query = search.trim().toLocaleLowerCase();
@@ -159,7 +162,11 @@ export default function DocumentationLibrary() {
                   <p>{item.description}</p>
                   <div>
                     <a href={item.docsHref} rel="noopener noreferrer" target="_blank">Read concept guide <ArrowUpRight size={14} aria-hidden="true" /></a>
-                    {item.href && <a href={item.href} rel="noopener noreferrer" target="_blank">Open visualizer <ArrowUpRight size={14} aria-hidden="true" /></a>}
+                    {item.href && (
+                      <button type="button" onClick={() => setActiveLab(item)}>
+                        Open visualization <ArrowUpRight size={14} aria-hidden="true" />
+                      </button>
+                    )}
                   </div>
                 </article>
               ))}
@@ -174,6 +181,7 @@ export default function DocumentationLibrary() {
           <p className="documentationNote">Concept guides open the official library or algorithm documentation. Visualization links open the matching ModelMind tool in a new tab.</p>
         </section>
       </section>
+      <EmbeddedLabViewer lab={activeLab} onClose={() => setActiveLab(null)} />
     </main>
   );
 }

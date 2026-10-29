@@ -6380,22 +6380,31 @@ button {
   padding-top: 14px;
 }
 
-.visualizationGuideCard a {
+.visualizationGuideCard a,
+.visualizationGuideCard button {
   display: inline-flex;
   align-items: center;
   gap: 3px;
+  padding: 0;
+  border: 0;
   color: #6847dc;
+  background: transparent;
+  font: inherit;
   font-size: 10px;
   font-weight: 800;
   text-decoration: none;
+  cursor: pointer;
 }
 
-.visualizationGuideCard a:hover {
+.visualizationGuideCard a:hover,
+.visualizationGuideCard button:hover {
   text-decoration: underline;
 }
 
-.visualizationGuideCard a svg { transition: transform .16s ease; }
-.visualizationGuideCard a:hover svg { transform: translate(2px, -2px); }
+.visualizationGuideCard a svg,
+.visualizationGuideCard button svg { transition: transform .16s ease; }
+.visualizationGuideCard a:hover svg,
+.visualizationGuideCard button:hover svg { transform: translate(2px, -2px); }
 
 .documentationNote {
   margin: 0;
@@ -6437,6 +6446,7 @@ button {
 
 .mlResourceCard:focus-visible,
 .visualizationGuideCard a:focus-visible,
+.visualizationGuideCard button:focus-visible,
 .documentationFilters button:focus-visible,
 .documentationSearch input:focus-visible { outline: 3px solid rgba(116,83,239,.38); outline-offset: 3px; }
 
@@ -8680,6 +8690,20 @@ button {
   border: none;
   display: block;
 }
+
+.mm-lab-guard-message {
+  display: grid;
+  min-height: 240px;
+  align-content: center;
+  justify-items: center;
+  gap: 8px;
+  padding: 24px;
+  color: var(--dashboard-muted);
+  text-align: center;
+}
+
+.mm-lab-guard-message strong { color: var(--dashboard-text); font-size: 18px; }
+.mm-lab-guard-message span { max-width: 440px; font-size: 13px; line-height: 1.5; }
 
 /* VideoGPT home preview */
 .referenceVideoWorkspace {
