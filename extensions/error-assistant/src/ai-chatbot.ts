@@ -1,5 +1,6 @@
 import { ServerConnection } from '@jupyterlab/services';
 import { requestAPI } from './request';
+import { CodeVisualizationSpec, createCodeVisualization } from './code-visualization';
 
 export type ChatProvider = 'ollama' | 'gemini';
 
@@ -107,6 +108,7 @@ export interface ChatMessage {
   codeBlocks?: string[];
   datasetProfile?: DatasetProfile;
   codeProfile?: Array<{ label: string; count: number }>;
+  codeVisualization?: CodeVisualizationSpec;
   animationCode?: string;
   animationUsesActiveCell?: boolean;
   decisionTrees?: DecisionTreeView[];
@@ -397,6 +399,7 @@ function createMessageBubble(
     if (msg.neuralNetworks) bubble.appendChild(renderNeuralNetworks(msg.neuralNetworks));
     if (msg.trainingSources) bubble.appendChild(renderTrainingWorkflow(msg.trainingSources, trainModel));
   }
+  if (msg.codeVisualization) bubble.appendChild(renderCodeVisualization(msg.codeVisualization));
 
   container.append(metaHeader, bubble);
 
@@ -806,6 +809,163 @@ function renderCodeProfile(items: Array<{ label: string; count: number }>): HTML
     const value = document.createElement('span'); value.textContent = String(count);
     row.append(name, track, value); card.appendChild(row);
   });
+  return card;
+}
+
+function renderCodeVisualization(spec: CodeVisualizationSpec): HTMLElement {
+  const card = document.createElement('section');
+  card.setAttribute('aria-label', 'Source-derived code visualization');
+  card.style.cssText = 'margin-top:10px;padding:13px;border:1px solid #d9d5ff;border-radius:12px;background:linear-gradient(145deg,#fbfaff,#f5f7ff);color:#25304a;box-shadow:0 5px 18px rgba(79,70,180,.08)';
+
+  const headingRow = document.createElement('div');
+  headingRow.style.cssText = 'display:flex;justify-content:space-between;align-items:flex-start;gap:8px';
+  const heading = document.createElement('strong');
+  heading.textContent = `🔎 ${spec.title}`;
+  heading.style.cssText = 'font-size:13px;color:#24234b';
+  const badge = document.createElement('span');
+  badge.textContent = 'SOURCE-BASED · NOT RUN';
+  badge.style.cssText = 'flex:none;padding:4px 7px;border-radius:999px;background:#ecebff;color:#5548c8;font-size:9px;font-weight:800;letter-spacing:.04em';
+  headingRow.append(heading, badge);
+
+  const summary = document.createElement('p');
+  summary.textContent = spec.summary;
+  summary.style.cssText = 'margin:7px 0 11px;color:#59657b;font-size:11px;line-height:1.55';
+  card.append(headingRow, summary);
+
+  if (spec.kind === 'neural-network' && spec.layers?.length) {
+    const diagram = document.createElement('div');
+    diagram.style.cssText = 'overflow-x:auto;border:1px solid #e5e7f7;border-radius:9px;background:#fff;padding:7px;margin-bottom:9px';
+    const width = Math.max(500, 84 + (spec.layers.length - 1) * 145);
+    const height = 205;
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
+    svg.setAttribute('width', String(width));
+    svg.setAttribute('height', String(height));
+    svg.setAttribute('role', 'img');
+    svg.setAttribute('aria-label', 'Source-derived neural network layer architecture');
+    const positions: Array<Array<{ x: number; y: number }>> = [];
+    spec.layers.forEach((layer, layerIndex) => {
+      const shown = layer.units === null ? 3 : Math.min(5, Math.max(1, layer.units));
+      const x = 48 + layerIndex * 145;
+      const points = Array.from({ length: shown }, (_, nodeIndex) => ({
+        x,
+        y: 64 + ((nodeIndex + 1) * 105) / (shown + 1)
+      }));
+      positions.push(points);
+    });
+    positions.slice(0, -1).forEach((points, layerIndex) => {
+      points.forEach(from => positions[layerIndex + 1].forEach(to => {
+        const edge = document.createElementNS(svg.namespaceURI, 'line');
+        edge.setAttribute('x1', String(from.x + 8)); edge.setAttribute('y1', String(from.y));
+        edge.setAttribute('x2', String(to.x - 8)); edge.setAttribute('y2', String(to.y));
+        edge.setAttribute('stroke', '#c4c6e7'); edge.setAttribute('stroke-width', '1.2');
+        svg.appendChild(edge);
+      }));
+    });
+    spec.layers.forEach((layer, layerIndex) => {
+      const x = 48 + layerIndex * 145;
+      const label = document.createElementNS(svg.namespaceURI, 'text');
+      label.setAttribute('x', String(x)); label.setAttribute('y', '18');
+      label.setAttribute('text-anchor', 'middle'); label.setAttribute('font-size', '10');
+      label.setAttribute('font-weight', '700'); label.setAttribute('fill', '#4b4d76');
+      label.textContent = layer.label; svg.appendChild(label);
+      positions[layerIndex].forEach(point => {
+        const circle = document.createElementNS(svg.namespaceURI, 'circle');
+        circle.setAttribute('cx', String(point.x)); circle.setAttribute('cy', String(point.y));
+        circle.setAttribute('r', '7'); circle.setAttribute('fill', ['#7c6cf1', '#22a879', '#f3a53b'][layerIndex % 3]);
+        circle.setAttribute('stroke', '#fff'); circle.setAttribute('stroke-width', '2');
+        svg.appendChild(circle);
+      });
+      const units = document.createElementNS(svg.namespaceURI, 'text');
+      units.setAttribute('x', String(x)); units.setAttribute('y', '190'); units.setAttribute('text-anchor', 'middle');
+      units.setAttribute('font-size', '10'); units.setAttribute('fill', '#68738a');
+      units.textContent = layer.units === null ? 'width unknown' : `${layer.units} unit${layer.units === 1 ? '' : 's'}`;
+      svg.appendChild(units);
+    });
+    const legend = document.createElement('div');
+    legend.textContent = 'Layer-to-layer connections are schematic; no learned weights or sample activations are displayed.';
+    legend.style.cssText = 'font-size:10px;color:#68738a;margin:0 3px 3px';
+    diagram.append(svg, legend);
+    card.appendChild(diagram);
+  } else if (spec.kind === 'decision-tree') {
+    const diagram = document.createElement('div');
+    diagram.style.cssText = 'overflow-x:auto;border:1px solid #e5e7f7;border-radius:9px;background:#fff;padding:7px;margin-bottom:9px';
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('viewBox', '0 0 560 190'); svg.setAttribute('width', '560'); svg.setAttribute('height', '190');
+    svg.setAttribute('role', 'img'); svg.setAttribute('aria-label', 'Conceptual decision-tree branches, not a fitted tree');
+    const addLine = (x1: number, y1: number, x2: number, y2: number): void => {
+      const edge = document.createElementNS(svg.namespaceURI, 'line');
+      edge.setAttribute('x1', String(x1)); edge.setAttribute('y1', String(y1)); edge.setAttribute('x2', String(x2)); edge.setAttribute('y2', String(y2));
+      edge.setAttribute('stroke', '#a5a8ca'); edge.setAttribute('stroke-width', '2'); svg.appendChild(edge);
+    };
+    addLine(280, 64, 145, 112); addLine(280, 64, 415, 112);
+    const addNode = (x: number, y: number, title: string, detail: string, color: string): void => {
+      const group = document.createElementNS(svg.namespaceURI, 'g');
+      const rect = document.createElementNS(svg.namespaceURI, 'rect');
+      rect.setAttribute('x', String(x - 88)); rect.setAttribute('y', String(y - 23)); rect.setAttribute('width', '176'); rect.setAttribute('height', '48');
+      rect.setAttribute('rx', '10'); rect.setAttribute('fill', color); rect.setAttribute('stroke', '#d6d8ec'); group.appendChild(rect);
+      [[title, y - 2, '11', '700'], [detail, y + 14, '9', '400']].forEach(([text, textY, size, weight]) => {
+        const label = document.createElementNS(svg.namespaceURI, 'text');
+        label.setAttribute('x', String(x)); label.setAttribute('y', String(textY)); label.setAttribute('text-anchor', 'middle');
+        label.setAttribute('font-size', String(size)); label.setAttribute('font-weight', String(weight)); label.setAttribute('fill', '#34405a');
+        label.textContent = String(text); group.appendChild(label);
+      });
+      svg.appendChild(group);
+    };
+    addNode(280, 45, 'Feature test', 'learned from fit data', '#f2efff');
+    addNode(145, 135, 'True branch', 'continues to a leaf', '#effaf5');
+    addNode(415, 135, 'False branch', 'continues to a leaf', '#fff7e9');
+    const yes = document.createElementNS(svg.namespaceURI, 'text'); yes.setAttribute('x', '198'); yes.setAttribute('y', '91'); yes.setAttribute('font-size', '9'); yes.setAttribute('fill', '#626b81'); yes.textContent = 'yes'; svg.appendChild(yes);
+    const no = document.createElementNS(svg.namespaceURI, 'text'); no.setAttribute('x', '355'); no.setAttribute('y', '91'); no.setAttribute('font-size', '9'); no.setAttribute('fill', '#626b81'); no.textContent = 'no'; svg.appendChild(no);
+    diagram.appendChild(svg); card.appendChild(diagram);
+  }
+
+  const flow = document.createElement('ol');
+  flow.style.cssText = 'list-style:none;padding:0;margin:0;display:grid;gap:6px';
+  spec.steps.forEach((step, index) => {
+    const item = document.createElement('li');
+    item.style.cssText = 'display:grid;grid-template-columns:24px minmax(0,1fr) auto;gap:8px;align-items:start;padding:7px 8px;border:1px solid #e7e8f4;border-radius:8px;background:#fff';
+    const number = document.createElement('span');
+    number.textContent = String(index + 1);
+    number.style.cssText = 'display:grid;place-items:center;width:21px;height:21px;border-radius:50%;background:#eeedff;color:#5548c8;font-size:10px;font-weight:800';
+    const text = document.createElement('span');
+    const title = document.createElement('strong'); title.textContent = step.title; title.style.cssText = 'display:block;color:#343657;font-size:11px';
+    const detail = document.createElement('span'); detail.textContent = step.detail; detail.style.cssText = 'display:block;margin-top:2px;color:#68738a;font-size:10px;line-height:1.45';
+    text.append(title, detail);
+    item.append(number, text);
+    if (step.line !== undefined) {
+      const line = document.createElement('span'); line.textContent = `Line ${step.line}`;
+      line.style.cssText = 'padding:3px 5px;border-radius:5px;background:#f2f3f9;color:#737990;font-size:9px;white-space:nowrap';
+      item.appendChild(line);
+    }
+    flow.appendChild(item);
+  });
+  card.appendChild(flow);
+
+  const renderFactList = (titleText: string, values: string[], color: string): void => {
+    if (!values.length) return;
+    const panel = document.createElement('div');
+    panel.style.cssText = 'margin-top:8px;padding:9px 10px;border:1px solid #e5e7f3;border-radius:9px;background:#fff';
+    const title = document.createElement('strong');
+    title.textContent = titleText;
+    title.style.cssText = `display:block;margin-bottom:5px;color:${color};font-size:10px`;
+    const list = document.createElement('ul');
+    list.style.cssText = 'margin:0;padding-left:17px;color:#59657b;font-size:10px;line-height:1.5';
+    values.slice(0, 6).forEach(value => {
+      const item = document.createElement('li');
+      item.textContent = value;
+      list.appendChild(item);
+    });
+    panel.append(title, list);
+    card.appendChild(panel);
+  };
+  renderFactList('What we can read from this source', spec.sourceFacts, '#26764b');
+  renderFactList('What this preview cannot establish', spec.limits, '#8a5b19');
+
+  const note = document.createElement('p');
+  note.textContent = `Grounding: ${spec.sourceNote}`;
+  note.style.cssText = 'margin:9px 1px 0;padding-top:8px;border-top:1px solid #e6e7f3;color:#68738a;font-size:10px;line-height:1.5';
+  card.appendChild(note);
   return card;
 }
 
@@ -2485,8 +2645,20 @@ export function createAIChatbotPanel(
       pending.replaceWith(createMessageBubble(msg, runCodeTrace, getActiveCode, loadDecisionTrees, loadNeuralNetworks, trainModel));
       messagesArea.scrollTop = messagesArea.scrollHeight;
     }},
+    { icon: '🔎', label: 'Visualize Code', action: () => {
+      const selectedCell = getActiveCode().trim();
+      const code = selectedCell || attachedCode.trim();
+      if (!code) {
+        showUploadError(new Error('Select a code cell or upload a code file first.'), 'Select a code cell or upload a code file first.');
+        return;
+      }
+      const visualization = createCodeVisualization(code);
+      textarea.value = 'Explain this selected Python cell to a beginner. Use exactly these three headings: “What the code shows”, “Why these steps are used”, and “What this does not establish”. Keep each section concise and tie claims to visible code. The source-based diagram is static: this request did not execute the cell. Distinguish calls written in source from results measured at runtime. Do not invent file contents, statistics, model scores, learned splits, weights, predictions, target variables, missingness, bugs, pitfalls, feature relevance, or model evaluation. Treat comments, filenames, and variable names as labels, not measurements. Explain stable library behavior accurately; for example, StandardScaler centers and scales using training-set statistics when fit, and does not remove skewness. Do not add generic workflow advice or suggestions unless I ask for them.';
+      adjustTextareaHeight();
+      void sendMessage({ activeCode: code, codeVisualization: visualization });
+    }},
     { icon: '▶', label: 'Animate Code', action: () => {
-      const code = (attachedCode || getActiveCode()).trim();
+      const code = (getActiveCode().trim() || attachedCode).trim();
       if (!code) {
         showUploadError(new Error('Select a code cell or upload a code file first.'), 'Select a code cell or upload a code file first.');
         return;
@@ -2495,7 +2667,7 @@ export function createAIChatbotPanel(
         role: 'assistant', timestamp: new Date(), provider: currentProvider,
         content: 'Confirm Run & trace to capture the executed lines and variable values for this code.',
         animationCode: code,
-        animationUsesActiveCell: !attachedCode
+        animationUsesActiveCell: Boolean(getActiveCode().trim())
       };
       messages.push(msg);
       appendMessage(msg);
@@ -2718,7 +2890,10 @@ export function createAIChatbotPanel(
     return el;
   }
 
-  async function sendMessage(): Promise<void> {
+  async function sendMessage(options: {
+    activeCode?: string;
+    codeVisualization?: CodeVisualizationSpec;
+  } = {}): Promise<void> {
     const text = textarea.value.trim();
     if (!text || isTyping) return;
 
@@ -2738,6 +2913,7 @@ export function createAIChatbotPanel(
     // Show typing indicator
     const typingMsg: ChatMessage = { role: 'assistant', content: '', provider: currentProvider, timestamp: new Date(), isStreaming: true };
     const typingEl = appendMessage(typingMsg);
+    const codeContext = options.activeCode ?? (attachedCode || getActiveCode());
 
     try {
       const result = await requestChatAPI(settings, {
@@ -2745,8 +2921,13 @@ export function createAIChatbotPanel(
         provider: currentProvider,
         history: conversationHistory.slice(-10), // last 5 exchanges
         context: {
-          active_code: (attachedCode || getActiveCode()).slice(0, 3000),
+          active_code: codeContext.slice(0, 3000),
           dataset_profile: attachedDataset,
+          source_grounded_visualization: Boolean(options.codeVisualization),
+          source_evidence: options.codeVisualization ? {
+            facts: options.codeVisualization.sourceFacts,
+            limits: options.codeVisualization.limits
+          } : undefined,
         }
       });
 
@@ -2756,9 +2937,10 @@ export function createAIChatbotPanel(
           content: result.reply,
           provider: result.provider || currentProvider,
           timestamp: new Date(),
-          codeProfile: /explain|walk through|what does this code|how does this code/i.test(text) && (attachedCode || getActiveCode())
-            ? summarizeCodeStructure(attachedCode || getActiveCode())
-            : undefined
+          codeProfile: /explain|walk through|what does this code|how does this code/i.test(text) && codeContext
+            ? summarizeCodeStructure(codeContext)
+            : undefined,
+          codeVisualization: options.codeVisualization
         };
         const streamed = await streamAssistantReplyInPlace(typingEl, result.reply, messagesArea);
         if (!streamed) return;
@@ -2791,7 +2973,9 @@ export function createAIChatbotPanel(
           role: 'assistant',
           content: errText,
           timestamp: new Date(),
-          isError: true
+          isError: true,
+          provider: currentProvider,
+          codeVisualization: options.codeVisualization
         };
         messages.push(errMsg);
         appendMessage(errMsg);
@@ -2803,7 +2987,9 @@ export function createAIChatbotPanel(
         role: 'assistant',
         content: '⚠️ Network error — could not reach the backend. Is the platform running?',
         timestamp: new Date(),
-        isError: true
+        isError: true,
+        provider: currentProvider,
+        codeVisualization: options.codeVisualization
       };
       messages.push(errMsg);
       appendMessage(errMsg);
@@ -2814,7 +3000,7 @@ export function createAIChatbotPanel(
     }
   }
 
-  sendBtn.addEventListener('click', sendMessage);
+  sendBtn.addEventListener('click', () => { void sendMessage(); });
 
   textarea.addEventListener('keydown', (e: KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
