@@ -2,9 +2,9 @@
 
 Last updated: 2026-10-30
 
-## Version 0.2.8
+## Version 0.2.9
 
-This release refreshes persistent macOS and Windows notebook environments when the bundled extension version or JupyterLab frontend build changes. The v0.2.7 chatbot visualization, Run & trace, Practice area, and plain notebook features are carried forward. The installer workflow builds all supported macOS and Windows assets for the `private-companion-v0.2.8` tag.
+This release adds a clean **Plain ModelMind Notebook** workspace: ModelMind AI, debugger, API-key, and ML Studio panels stay hidden while it is active, and the prior sidebar layout is restored when returning to a regular notebook. Existing Practice notebook content is preserved when it is renamed. The extension version is bumped to 0.1.4 so installed apps refresh the updated frontend bundle. The v0.2.8 installer-upgrade fix and the v0.2.7 chatbot visualization, Run & trace, and Practice features are carried forward. The installer workflow builds all supported macOS and Windows assets for the `private-companion-v0.2.9` tag.
 
 ## Source of truth
 

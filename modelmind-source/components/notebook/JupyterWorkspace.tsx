@@ -34,11 +34,11 @@ export default function JupyterWorkspace() {
             className="jupyterLaunchButton jupyterPlainLaunchButton"
             notebookType="plain"
           >
-            Open ModelMind Notebook · Plain mode <span aria-hidden="true">↗</span>
+            Open Plain ModelMind Notebook <span aria-hidden="true">↗</span>
           </OpenJupyterForm>
         </div>
         <p className="jupyterPlainNote">
-          This notebook opens in standard JupyterLab with ModelMind AI, the debugger tutor, API-key tools, and ML Studio hidden for the plain notebook.
+          Opens a clean Jupyter notebook named Plain ModelMind Notebook. ModelMind AI, debugger, API-key, and ML Studio panels stay out of the way.
         </p>
         <a
           href="https://github.com/harshitsachan830-dev/Backup2/releases"

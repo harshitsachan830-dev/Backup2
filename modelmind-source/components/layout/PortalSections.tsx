@@ -445,7 +445,7 @@ export default function PortalSections({
                   className="referenceSecondaryLink referencePlainNotebookLink"
                   notebookType="plain"
                 >
-                  ModelMind Notebook · Plain mode <ArrowIcon />
+                  Plain ModelMind Notebook <ArrowIcon />
                 </OpenJupyterForm>
               </div>
             }
@@ -769,11 +769,11 @@ function PracticeWorkspace() {
         <div className="practiceNextStep">
           <div>
             <span className="practiceEyebrow">YOUR WORKSPACE</span>
-            <h2>Want to solve a question in Jupyter?</h2>
-            <p>Open a plain notebook for coding practice. It hides ModelMind AI and ML Studio tools for that notebook.</p>
+            <h2>Want to solve a question in a notebook?</h2>
+            <p>Open Plain ModelMind Notebook for a clean Jupyter workspace without the AI chat or ML Studio panels.</p>
           </div>
           <OpenJupyterForm className="practiceNotebookButton" notebookType="plain">
-            Open ModelMind Notebook · Plain mode <ArrowIcon />
+            Open Plain ModelMind Notebook <ArrowIcon />
           </OpenJupyterForm>
         </div>
 

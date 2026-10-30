@@ -381,15 +381,63 @@ const plugin: JupyterFrontEndPlugin<void> = {
     panel.title.caption = 'Notebook error assistant';
     panel.addClass('ml-platform-error-assistant-panel');
 
+    const modeAwareWidgets: Widget[] = [panel];
+    const shellLayout = app.shell as typeof app.shell & {
+      leftCollapsed?: boolean;
+      rightCollapsed?: boolean;
+      collapseLeft?: () => void;
+      collapseRight?: () => void;
+      expandLeft?: () => void;
+      expandRight?: () => void;
+      restored?: Promise<unknown>;
+    };
+    let previousSidebarState: {
+      leftCollapsed: boolean;
+      rightCollapsed: boolean;
+    } | null = null;
     let connectedNotebookModel: INotebookModel | null = null;
     const refreshNotebookPresentation = (): void => {
       const plainNotebook =
         getModelMindNotebookRole(notebooks.currentWidget?.context.model) ===
         'plain';
-      const toolWidgets = [panel];
-      for (const widget of toolWidgets) {
+      for (const widget of modeAwareWidgets) {
         if (plainNotebook) widget.hide();
         else widget.show();
+      }
+      if (plainNotebook) {
+        const collapsePlainNotebookSidebars = (): void => {
+          if (
+            getModelMindNotebookRole(notebooks.currentWidget?.context.model) !==
+            'plain'
+          ) {
+            return;
+          }
+          if (!previousSidebarState) {
+            previousSidebarState = {
+              leftCollapsed: shellLayout.leftCollapsed ?? false,
+              rightCollapsed: shellLayout.rightCollapsed ?? false
+            };
+          }
+          shellLayout.collapseLeft?.();
+          shellLayout.collapseRight?.();
+        };
+        if (shellLayout.restored) {
+          void shellLayout.restored.then(collapsePlainNotebookSidebars);
+        } else {
+          collapsePlainNotebookSidebars();
+        }
+      } else if (previousSidebarState) {
+        if (previousSidebarState.leftCollapsed) {
+          shellLayout.collapseLeft?.();
+        } else {
+          shellLayout.expandLeft?.();
+        }
+        if (previousSidebarState.rightCollapsed) {
+          shellLayout.collapseRight?.();
+        } else {
+          shellLayout.expandRight?.();
+        }
+        previousSidebarState = null;
       }
       setTutorEnabled(!plainNotebook);
     };
@@ -1518,7 +1566,7 @@ for _mm_cleanup in ('_mm_args', '_mm_ns', '_mm_X', '_mm_y', '_mm_bad', '_mm_targ
     chatbotWidget.node.style.cssText = 'height:100%;overflow:hidden;';
     chatbotWidget.node.appendChild(chatbotRoot);
     app.shell.add(chatbotWidget, 'right', { rank: 800 });
-    const modeAwareWidgets = [panel, chatbotWidget];
+    modeAwareWidgets.push(chatbotWidget);
 
     // ═══════════════════════════════════════════════════════════
     // AUTO-TRIGGER: Fire the Tutor immediately when any cell fails
@@ -1648,8 +1696,8 @@ for _mm_cleanup in ('_mm_args', '_mm_ns', '_mm_X', '_mm_y', '_mm_bad', '_mm_targ
 
     const PLAIN_NOTEBOOK_COMMAND = 'modelmind:create-plain-practice-notebook';
     app.commands.addCommand(PLAIN_NOTEBOOK_COMMAND, {
-      label: 'Plain Practice Notebook',
-      caption: 'Create a standard Jupyter notebook without ModelMind AI or Studio tools',
+      label: 'Plain ModelMind Notebook',
+      caption: 'Create a clean Jupyter notebook without ModelMind AI or Studio panels',
       execute: () => createNotebook('plain')
     });
 

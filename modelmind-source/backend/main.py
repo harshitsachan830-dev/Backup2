@@ -260,9 +260,9 @@ def _ensure_jupyter_notebook(server: dict, notebook_type: NotebookType) -> str:
             "your own solution in the cells below.",
         ),
         "plain": (
-            "Practice-Notebook.ipynb",
-            "Practice Notebook",
-            "A plain Jupyter notebook for practice. ModelMind AI, debugger, and ML Studio tools are hidden for this notebook.",
+            "Plain-ModelMind-Notebook.ipynb",
+            "Plain ModelMind Notebook",
+            "A clean Jupyter notebook for coding practice. ModelMind AI, debugger, API-key, and ML Studio panels are hidden while this notebook is active.",
         ),
     }
     filename, title, intro = notebook_details[notebook_type]
@@ -279,10 +279,10 @@ def _ensure_jupyter_notebook(server: dict, notebook_type: NotebookType) -> str:
     base_url = server.get("base_url")
     if not isinstance(base_url, str) or not base_url.startswith("/"):
         base_url = parsed_url.path or "/"
-    content_url = (
+    contents_url = (
         f"http://127.0.0.1:{port}{base_url.rstrip('/')}/api/contents/"
-        f"{quote(filename)}"
     )
+    content_url = f"{contents_url}{quote(filename)}"
     lab_url = f"http://127.0.0.1:{port}{base_url.rstrip('/')}/lab/"
     token = server.get("token")
     headers = {"Content-Type": "application/json"}
@@ -297,24 +297,50 @@ def _ensure_jupyter_notebook(server: dict, notebook_type: NotebookType) -> str:
         opener, cookie_jar, lab_url, headers
     )
 
-    try:
+    def read_notebook(path: str) -> dict | None:
         request = urllib.request.Request(
-            f"{content_url}?content=1",
+            f"{contents_url}{quote(path)}?content=1",
             headers=headers,
             method="GET",
         )
-        with opener.open(request, timeout=5) as response:
-            document = json.loads(response.read())
-    except urllib.error.HTTPError as error:
-        if error.code != 404:
+        try:
+            with opener.open(request, timeout=5) as response:
+                result = json.loads(response.read())
+        except urllib.error.HTTPError as error:
+            if error.code == 404:
+                return None
             raise RuntimeError(
-                f"Could not inspect {filename} in the notebook workspace."
+                f"Could not inspect {path} in the notebook workspace."
             ) from error
-        document = None
-    except (OSError, json.JSONDecodeError) as error:
-        raise RuntimeError(
-            f"Could not inspect {filename} in the notebook workspace."
-        ) from error
+        except (OSError, json.JSONDecodeError) as error:
+            raise RuntimeError(
+                f"Could not inspect {path} in the notebook workspace."
+            ) from error
+        if not isinstance(result, dict):
+            raise RuntimeError(f"{path} is not a readable notebook.")
+        return result
+
+    document = read_notebook(filename)
+    renamed_legacy_plain_notebook = False
+    if document is None and notebook_type == "plain":
+        legacy_filename = "Practice-Notebook.ipynb"
+        legacy_document = read_notebook(legacy_filename)
+        if legacy_document is not None:
+            rename_request = urllib.request.Request(
+                f"{contents_url}{quote(legacy_filename)}",
+                data=json.dumps({"path": filename}).encode("utf-8"),
+                headers=headers,
+                method="PATCH",
+            )
+            try:
+                with opener.open(rename_request, timeout=5):
+                    pass
+            except (OSError, urllib.error.HTTPError) as error:
+                raise RuntimeError(
+                    "Could not rename the existing practice notebook."
+                ) from error
+            document = legacy_document
+            renamed_legacy_plain_notebook = True
 
     if document is None:
         needs_update = True
@@ -349,9 +375,28 @@ def _ensure_jupyter_notebook(server: dict, notebook_type: NotebookType) -> str:
         metadata = notebook_content.setdefault("metadata", {})
         if not isinstance(metadata, dict):
             raise RuntimeError(f"{filename} has invalid notebook metadata.")
-        needs_update = metadata.get("modelmind_notebook_type") != notebook_type
+        needs_update = (
+            metadata.get("modelmind_notebook_type") != notebook_type
+            or renamed_legacy_plain_notebook
+        )
         if needs_update:
             metadata["modelmind_notebook_type"] = notebook_type
+        if notebook_type == "plain":
+            cells = notebook_content.get("cells")
+            if isinstance(cells, list) and cells:
+                first_cell = cells[0]
+                if isinstance(first_cell, dict) and first_cell.get("cell_type") == "markdown":
+                    source = first_cell.get("source", "")
+                    source_text = "".join(source) if isinstance(source, list) else source
+                    if isinstance(source_text, str) and source_text.startswith(
+                        "# Practice Notebook"
+                    ):
+                        first_cell["source"] = source_text.replace(
+                            "# Practice Notebook",
+                            "# Plain ModelMind Notebook",
+                            1,
+                        )
+                        needs_update = True
         payload = {
             "type": "notebook",
             "format": "json",

@@ -449,7 +449,7 @@ export class ModelMindStudioWidget extends Widget {
       notebookRole === 'trainer'
         ? 'Trainer Notebook · Preview only'
         : notebookRole === 'plain'
-          ? 'Plain Practice Notebook · Tools disabled'
+          ? 'Plain ModelMind Notebook'
           : 'ModelMind Notebook';
     document.getElementById('mm-code-preview-modal')?.remove();
     this._renderCurrentTab();

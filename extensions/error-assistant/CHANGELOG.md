@@ -2,6 +2,11 @@
 
 <!-- <START NEW CHANGELOG ENTRY> -->
 
+## 0.1.4
+
+- Add a clean Plain ModelMind Notebook mode that hides ModelMind side panels and restores the previous layout when switching back.
+- Name the notebook and its visible controls consistently; preserve existing practice notebook content when migrating its filename.
+
 ## 0.1.3
 
 - Refresh an installed notebook extension when its Python package version or JupyterLab frontend assets are stale.

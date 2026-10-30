@@ -43,7 +43,7 @@ jobs:
         if: matrix.platform == 'macOS'
         env:
           MODELMIND_PACKAGE_SUFFIX: ${{ matrix.suffix }}
-          MODELMIND_APP_VERSION: "0.2.8"
+          MODELMIND_APP_VERSION: "0.2.9"
         run: |
           bash -n scripts/start-beta-macos.command
           bash -n scripts/start-platform.sh
@@ -54,7 +54,7 @@ jobs:
         shell: pwsh
         env:
           MODELMIND_PACKAGE_SUFFIX: ${{ matrix.suffix }}
-          MODELMIND_APP_VERSION: "0.2.8"
+          MODELMIND_APP_VERSION: "0.2.9"
         run: |
           python scripts/check-extension-wheel.py
           $tokens = $null
@@ -101,9 +101,9 @@ jobs:
       - name: Create release notes
         run: |
           cat << 'EOF' > release-notes.md
-          ## What's updated in 0.2.8
+          ## What's updated in 0.2.9
 
-          This release fixes extension upgrades on macOS and Windows so the bundled Python package and JupyterLab frontend stay in sync. Existing user environments now refresh the extension when its version or frontend bundle changes. It includes the source-grounded chatbot visualizations, user-triggered Run & trace, Practice area, and plain notebook mode from v0.2.7.
+          Open a clean Jupyter workspace named **Plain ModelMind Notebook** from the Notebook and Practice pages. Its ModelMind AI, debugger, API-key, and ML Studio panels stay hidden while it is active, and the previous sidebar layout returns when switching to a regular notebook. Existing Practice notebooks are preserved and renamed on first open. The extension is updated to v0.1.4 so installed apps refresh the new frontend assets. This release carries forward v0.2.8 installer upgrade fixes and the v0.2.7 chatbot visualizations, user-triggered Run & trace, and Practice area.
 
           ## ModelMind Installers & User Guide
 
