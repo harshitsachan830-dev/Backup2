@@ -1,6 +1,6 @@
 {
   "name": "@ml-platform/error-assistant",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "JupyterLab error assistant frontend and server extension",
   "keywords": [
     "jupyter",
@@ -109,7 +109,7 @@
     "extension": true,
     "outputDir": "ml_platform_error_assistant/labextension",
     "_build": {
-      "load": "static/remoteEntry.5a13663d581d2daa.js",
+      "load": "static/remoteEntry.58f17c6574293aac.js",
       "extension": "./extension",
       "style": "./style"
     }

@@ -2,9 +2,9 @@
 
 Last updated: 2026-10-30
 
-## Version 0.2.7
+## Version 0.2.8
 
-This release adds source-grounded Ollama code explanations and visualizations, user-triggered code tracing and animation, a Practice area, and a plain notebook mode without AI or ML Studio tools. The private companion installer workflow builds all supported macOS and Windows assets for the `private-companion-v0.2.7` tag.
+This release refreshes persistent macOS and Windows notebook environments when the bundled extension version or JupyterLab frontend build changes. The v0.2.7 chatbot visualization, Run & trace, Practice area, and plain notebook features are carried forward. The installer workflow builds all supported macOS and Windows assets for the `private-companion-v0.2.8` tag.
 
 ## Source of truth
 

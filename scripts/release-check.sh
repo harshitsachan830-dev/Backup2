@@ -26,6 +26,12 @@ if [[ ! -f "$ROOT_DIR/extensions/error-assistant/package.json" ]]; then
   exit 1
 fi
 
+if [[ -x "$PYTHON_BIN" ]]; then
+  "$PYTHON_BIN" "$ROOT_DIR/scripts/check-extension-wheel.py"
+else
+  python3 "$ROOT_DIR/scripts/check-extension-wheel.py"
+fi
+
 if [[ "${ML_PLATFORM_CLOUD_FALLBACK:-disabled}" != "disabled" ]]; then
   echo "Cloud fallback is explicitly enabled: ${ML_PLATFORM_CLOUD_FALLBACK}"
   echo 'This is allowed only for an intentional deployment opt-in.'

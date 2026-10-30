@@ -43,18 +43,20 @@ jobs:
         if: matrix.platform == 'macOS'
         env:
           MODELMIND_PACKAGE_SUFFIX: ${{ matrix.suffix }}
-          MODELMIND_APP_VERSION: "0.2.7"
+          MODELMIND_APP_VERSION: "0.2.8"
         run: |
           bash -n scripts/start-beta-macos.command
           bash -n scripts/start-platform.sh
+          python scripts/check-extension-wheel.py
           bash scripts/package-private-macos.sh
       - name: Validate and build Windows installer
         if: matrix.platform == 'Windows'
         shell: pwsh
         env:
           MODELMIND_PACKAGE_SUFFIX: ${{ matrix.suffix }}
-          MODELMIND_APP_VERSION: "0.2.7"
+          MODELMIND_APP_VERSION: "0.2.8"
         run: |
+          python scripts/check-extension-wheel.py
           $tokens = $null
           $errors = $null
           $files = @(
@@ -99,9 +101,9 @@ jobs:
       - name: Create release notes
         run: |
           cat << 'EOF' > release-notes.md
-          ## What's updated in 0.2.7
+          ## What's updated in 0.2.8
 
-          This release adds source-grounded code explanations and visualizations to the Ollama-powered notebook chatbot, including a user-triggered Run & trace flow for runtime animation. It also adds the Practice area and a plain ModelMind notebook mode for practice without AI or ML Studio tools. ModelMind and Trainer notebooks share the chatbot while preserving Trainer's preview-only notebook code actions.
+          This release fixes extension upgrades on macOS and Windows so the bundled Python package and JupyterLab frontend stay in sync. Existing user environments now refresh the extension when its version or frontend bundle changes. It includes the source-grounded chatbot visualizations, user-triggered Run & trace, Practice area, and plain notebook mode from v0.2.7.
 
           ## ModelMind Installers & User Guide
 

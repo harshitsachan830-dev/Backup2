@@ -112,20 +112,24 @@ $builtExtensionDir = Join-Path $root "extensions\error-assistant\ml_platform_err
 $serverConfigDir = Join-Path $venv "etc\jupyter\jupyter_server_config.d"
 $serverConfigFile = Join-Path $root "extensions\error-assistant\jupyter-config\server-config\ml_platform_error_assistant.json"
 
-$isExtensionInstalled = $false
-try {
-    & $python -c "import ml_platform_error_assistant" 2>$null
-    if ($LASTEXITCODE -eq 0) {
-        $isExtensionInstalled = $true
-    }
-} catch { }
-
-if (-not (Test-Path $jupyter) -or -not (Test-Path (Join-Path $extensionLink "package.json")) -or -not $isExtensionInstalled -or $SetupOnly -or $env:MODELMIND_SETUP_ONLY -eq "1") {
+if (-not (Test-Path $jupyter) -or $SetupOnly -or $env:MODELMIND_SETUP_ONLY -eq "1") {
     Write-Host "Installing ModelMind dependencies into virtual environment..."
     & $python -m pip install --upgrade pip
     & $python -m pip install -r (Join-Path $root "requirements.txt")
     & $python -m pip install -r (Join-Path $root "modelmind-source\backend\requirements.txt")
+}
 
+$extensionCheckScript = Join-Path $root "scripts\check-extension-wheel.py"
+$extensionIsCurrent = $false
+try {
+    & $python $extensionCheckScript --installed $extensionLink *> $null
+    $extensionIsCurrent = ($LASTEXITCODE -eq 0)
+} catch { }
+$needsExtensionInstall = $SetupOnly -or $env:MODELMIND_SETUP_ONLY -eq "1" -or
+    -not $extensionIsCurrent -or
+    -not (Test-Path $jupyter)
+
+if ($needsExtensionInstall) {
     $wheel = Get-ChildItem (Join-Path $root "wheels\ml_platform_error_assistant-*.whl") -ErrorAction SilentlyContinue | Select-Object -First 1
     if ($wheel) {
         Write-Host "Installing ModelMind extension from pre-built wheel..."
@@ -135,7 +139,7 @@ if (-not (Test-Path $jupyter) -or -not (Test-Path (Join-Path $extensionLink "pac
     }
 }
 
-# Ensure pre-built labextension files are in place in venv and APPDATA
+# Ensure the frontend bundle in Jupyter's search paths matches the app bundle.
 if (Test-Path $builtExtensionDir) {
     $locations = @(
         $extensionLink,

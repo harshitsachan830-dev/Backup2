@@ -2,6 +2,12 @@
 
 <!-- <START NEW CHANGELOG ENTRY> -->
 
+## 0.1.3
+
+- Refresh an installed notebook extension when its Python package version or JupyterLab frontend assets are stale.
+- Keep the installed Python package and bundled chatbot UI matched across macOS and Windows upgrades.
+- Verify the distributable wheel contains the current prebuilt frontend assets.
+
 ## 0.1.2
 
 - Explain measured model recommendations using the selected target, class balance, CV scores, fold variation, sample size, screening, and preprocessing evidence.
