@@ -10,6 +10,7 @@ export type Workspace =
   | "Notebook"
   | "Visualizations"
   | "VideoGPT"
+  | "Practice"
   | "Datasets"
   | "Projects"
   | "Community"
@@ -55,6 +56,11 @@ const menuItems: {
     label: "VideoGPT",
     workspace: "VideoGPT",
   },
+  {
+    icon: "practice",
+    label: "Practice",
+    workspace: "Practice",
+  },
 ];
 
 const resourceItems: { icon: string; label: string; workspace: Workspace }[] = [
@@ -86,6 +92,12 @@ function NavigationIcon({ name }: { name: string }) {
       <>
         <rect x="3" y="4" width="18" height="13" rx="2" />
         <path d="m10 8 5 2.5-5 2.5zM8 21h8" />
+      </>
+    ),
+    practice: (
+      <>
+        <path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v16H6.5A2.5 2.5 0 0 0 4 21z" />
+        <path d="M4 5.5v13A2.5 2.5 0 0 1 6.5 16H20M8 7h8M8 10h8" />
       </>
     ),
     datasets: (

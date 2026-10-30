@@ -41,6 +41,7 @@ let _isOpen = false;
 let _currentLevel: Level = 'basic';
 let _lastInput: TutorInput | null = null;
 let _serverSettings: Parameters<typeof requestAPI>[1] | null = null;
+let _tutorEnabled = true;
 
 export function ensureStyles(): void {
   if (document.getElementById('mm-tutor-styles')) return;
@@ -397,6 +398,20 @@ export function createFAB(
   document.body.appendChild(fab);
 }
 
+export function setTutorEnabled(enabled: boolean): void {
+  _tutorEnabled = enabled;
+  if (!enabled) {
+    closePanel();
+  }
+  const visibility = enabled ? '' : 'none';
+  for (const id of ['mm-tutor-fab', 'mm-tutor-panel', 'mm-tutor-overlay']) {
+    const element = document.getElementById(id) as HTMLElement | null;
+    if (element) {
+      element.style.display = visibility;
+    }
+  }
+}
+
 export function showFABAlert(): void {
   const badge = document.getElementById('mm-tutor-fab')?.querySelector('.badge');
   badge?.classList.add('show');
@@ -647,6 +662,9 @@ export async function loadTutorExplanation(
   serverSettings: Parameters<typeof requestAPI>[1],
   openWhenDone: boolean = false
 ): Promise<void> {
+  if (!_tutorEnabled) {
+    return;
+  }
   _lastInput = input;
   _serverSettings = serverSettings;
   ensureStyles();
@@ -679,11 +697,17 @@ export async function loadTutorExplanation(
         level: _currentLevel,
       })
     });
+    if (!_tutorEnabled) {
+      return;
+    }
     if (body) {
       renderResultInto(body, result);
     }
     showFABAlert();
   } catch (err) {
+    if (!_tutorEnabled) {
+      return;
+    }
     if (body) {
       body.replaceChildren();
       const errEl = document.createElement('div');
@@ -702,6 +726,9 @@ export async function renderTutorInElement(
   input: TutorInput | null,
   serverSettings: Parameters<typeof requestAPI>[1]
 ): Promise<void> {
+  if (!_tutorEnabled) {
+    return;
+  }
   _serverSettings = serverSettings;
   ensureStyles();
 
@@ -732,12 +759,18 @@ export async function renderTutorInElement(
         level: _currentLevel,
       })
     });
+    if (!_tutorEnabled) {
+      return;
+    }
 
     renderResultInto(container, result, (lvl) => {
       _currentLevel = lvl;
       void renderTutorInElement(container, input, serverSettings);
     });
   } catch (err) {
+    if (!_tutorEnabled) {
+      return;
+    }
     container.replaceChildren();
     const errEl = document.createElement('div');
     errEl.className = 'mm-tutor-empty';

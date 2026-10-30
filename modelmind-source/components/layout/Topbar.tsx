@@ -19,6 +19,7 @@ const searchTargets: {
     workspace: "Visualizations",
   },
   { label: "VideoGPT", keywords: "video explain learning", workspace: "VideoGPT" },
+  { label: "Practice", keywords: "questions practice quiz coding exercises", workspace: "Practice" },
   { label: "Datasets", keywords: "data csv files", workspace: "Datasets" },
   { label: "Projects", keywords: "saved work", workspace: "Projects" },
   { label: "Community", keywords: "learners people", workspace: "Community" },

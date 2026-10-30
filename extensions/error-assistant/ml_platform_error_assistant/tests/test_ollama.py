@@ -8,13 +8,17 @@ from ml_platform_error_assistant.ollama import (
     OLLAMA_BASE_URL,
     OLLAMA_EXPLAIN_MAX_BODY_BYTES,
     OLLAMA_EXPLAIN_TIMEOUT_SECONDS,
+    OLLAMA_SOURCE_VISUALIZATION_SCHEMA,
     OLLAMA_STATUS_MAX_BODY_BYTES,
     OLLAMA_STATUS_TIMEOUT_SECONDS,
+    SOURCE_VISUALIZATION_IDS,
+    chat_with_ollama,
     check_ollama_status,
     ensure_model_ready,
     explain_code_with_ollama,
     explain_with_ollama,
     load_model_manifest,
+    normalize_source_visualization_response,
     suggest_fix_with_ollama,
 )
 
@@ -480,3 +484,67 @@ async def test_ensure_model_ready_uses_manual_pull_when_allowed(monkeypatch):
 
 def json_bytes(value):
     return json.dumps(value).encode()
+
+
+def test_structured_visualization_response_keeps_only_registered_ids():
+    payload = {
+        "what_code_shows": "The cell creates a StandardScaler instance.",
+        "why_these_steps_are_used": "StandardScaler learns centering and scaling values when fit.",
+        "what_this_does_not_establish": "No transformed values or model score are shown.",
+        "visualization_ids": ["P04", "not-in-registry", "P04", "C02"],
+    }
+
+    result = normalize_source_visualization_response(
+        json.dumps(payload),
+        "from sklearn.preprocessing import StandardScaler\nscaler = StandardScaler()",
+        {"facts": ["The cell creates a StandardScaler instance."], "limits": []},
+    )
+
+    assert result["visualization_ids"] == ["P04", "C02"]
+    assert "### What the code shows" in result["reply"]
+    assert "### What this does not establish" in result["reply"]
+    assert result["used_fallback"] is False
+    assert set(result["visualization_ids"]).issubset(SOURCE_VISUALIZATION_IDS)
+
+
+def test_malformed_visualization_response_uses_grounded_fallback():
+    result = normalize_source_visualization_response(
+        "not json",
+        "scaler = StandardScaler()",
+        {"facts": ["The source assigns a StandardScaler instance to scaler."], "limits": []},
+    )
+
+    assert result["used_fallback"] is True
+    assert result["visualization_ids"] == []
+    assert "### Why these steps are used" in result["reply"]
+
+
+@pytest.mark.asyncio
+async def test_source_grounded_chat_requests_schema_and_returns_validated_visual_ids(monkeypatch):
+    async def fake_check(client=None):
+        model_id = load_model_manifest()["recommended_model"]["id"]
+        return {"status": "connected", "model_status": "available", "model_id": model_id}
+
+    monkeypatch.setattr("ml_platform_error_assistant.ollama.check_ollama_status", fake_check)
+    structured = {
+        "what_code_shows": "The source creates a PCA estimator with two components.",
+        "why_these_steps_are_used": "PCA represents numeric input in a lower-dimensional component space when fit and transformed.",
+        "what_this_does_not_establish": "No fitted components or projected rows are shown.",
+        "visualization_ids": ["pca", "unknown"],
+    }
+    client = FakeClient([FakeResponse(200, json_bytes({"message": {"content": json.dumps(structured)}}))])
+
+    result = await chat_with_ollama(
+        "Visualize this selected cell",
+        context={
+            "source_grounded_visualization": True,
+            "active_code": "from sklearn.decomposition import PCA\nmodel = PCA(n_components=2)",
+            "source_evidence": {"facts": ["The source configures PCA with n_components=2."], "limits": []},
+        },
+        client=client,
+    )
+
+    request_body = json.loads(client.requests[0].body)
+    assert request_body["format"] == OLLAMA_SOURCE_VISUALIZATION_SCHEMA
+    assert result["status"] == "replied"
+    assert result["visualization_ids"] == ["pca"]

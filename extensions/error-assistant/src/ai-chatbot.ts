@@ -1,6 +1,8 @@
 import { ServerConnection } from '@jupyterlab/services';
 import { requestAPI } from './request';
 import { CodeVisualizationSpec, createCodeVisualization } from './code-visualization';
+import { summarizeLoopTrace } from './trace-visualization';
+import { getVisualizationLabel } from './visualization-registry';
 
 export type ChatProvider = 'ollama' | 'gemini';
 
@@ -8,12 +10,14 @@ export interface CodeTraceEvent {
   line: number;
   functionName: string;
   variables: Record<string, string>;
+  callStack?: string[];
 }
 
 export type CodeTraceRunner = (code: string) => Promise<{
   events: CodeTraceEvent[];
   output: string;
   error?: string;
+  errorLine?: number;
 }>;
 
 export interface DecisionTreeNode {
@@ -109,6 +113,7 @@ export interface ChatMessage {
   datasetProfile?: DatasetProfile;
   codeProfile?: Array<{ label: string; count: number }>;
   codeVisualization?: CodeVisualizationSpec;
+  visualizationIds?: string[];
   animationCode?: string;
   animationUsesActiveCell?: boolean;
   decisionTrees?: DecisionTreeView[];
@@ -158,6 +163,7 @@ async function requestChatAPI(
   provider?: ChatProvider;
   model_id?: string;
   message?: string;
+  visualization_ids?: string[];
 }> {
   return requestAPI<{
     status: string;
@@ -165,6 +171,7 @@ async function requestChatAPI(
     provider?: ChatProvider;
     model_id?: string;
     message?: string;
+    visualization_ids?: string[];
   }>('api/ai/chat', settings, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -400,6 +407,7 @@ function createMessageBubble(
     if (msg.trainingSources) bubble.appendChild(renderTrainingWorkflow(msg.trainingSources, trainModel));
   }
   if (msg.codeVisualization) bubble.appendChild(renderCodeVisualization(msg.codeVisualization));
+  if (msg.visualizationIds?.length) bubble.appendChild(renderVisualizationRecommendations(msg.visualizationIds));
 
   container.append(metaHeader, bubble);
 
@@ -832,6 +840,57 @@ function renderCodeVisualization(spec: CodeVisualizationSpec): HTMLElement {
   summary.style.cssText = 'margin:7px 0 11px;color:#59657b;font-size:11px;line-height:1.55';
   card.append(headingRow, summary);
 
+  if (spec.category) {
+    const category = document.createElement('span');
+    category.textContent = spec.category;
+    category.style.cssText = 'display:inline-block;margin:-3px 0 9px;padding:3px 7px;border-radius:999px;background:#eeeaff;color:#5b4fd0;font-size:9px;font-weight:700';
+    card.appendChild(category);
+  }
+
+  spec.sourceOverlays?.forEach(overlay => {
+    const panel = document.createElement('section');
+    panel.style.cssText = 'margin:7px 0;padding:9px 10px;border:1px solid #e2e5f2;border-radius:9px;background:rgba(255,255,255,.8)';
+    const titleRow = document.createElement('div');
+    titleRow.style.cssText = 'display:flex;justify-content:space-between;align-items:center;gap:8px';
+    const title = document.createElement('strong');
+    title.textContent = `${overlay.id} · ${overlay.title}`;
+    title.style.cssText = 'font-size:11px;color:#343657';
+    const sourceTag = document.createElement('span');
+    sourceTag.textContent = 'SOURCE CUE';
+    sourceTag.style.cssText = 'flex:none;padding:3px 6px;border-radius:999px;background:#f0efff;color:#5b4fd0;font-size:8px;font-weight:800;letter-spacing:.04em';
+    titleRow.append(title, sourceTag);
+    const description = document.createElement('p');
+    description.textContent = overlay.summary;
+    description.style.cssText = 'margin:5px 0 7px;color:#68738a;font-size:10px;line-height:1.45';
+    const list = document.createElement('ol');
+    list.style.cssText = 'list-style:none;padding:0;margin:0;display:grid;gap:4px';
+    overlay.steps.forEach((step, index) => {
+      const row = document.createElement('li');
+      row.style.cssText = `display:grid;grid-template-columns:22px minmax(0,1fr) auto;gap:7px;align-items:start;padding:6px 7px;margin-left:${(step.indent ?? 0) * 12}px;border:1px solid #eceef7;border-radius:7px;background:#fff`;
+      const marker = document.createElement('span');
+      marker.textContent = String(index + 1);
+      marker.style.cssText = 'display:grid;place-items:center;width:19px;height:19px;border-radius:50%;background:#eeedff;color:#5548c8;font-size:9px;font-weight:800';
+      const body = document.createElement('span');
+      const stepTitle = document.createElement('strong');
+      stepTitle.textContent = step.title;
+      stepTitle.style.cssText = 'display:block;color:#343657;font-size:10px';
+      const detail = document.createElement('span');
+      detail.textContent = step.detail;
+      detail.style.cssText = 'display:block;margin-top:2px;color:#68738a;font-size:9px;line-height:1.4;overflow-wrap:anywhere';
+      body.append(stepTitle, detail);
+      row.append(marker, body);
+      if (step.line !== undefined) {
+        const line = document.createElement('span');
+        line.textContent = `L${step.line}`;
+        line.style.cssText = 'padding:3px 5px;border-radius:5px;background:#f2f3f9;color:#737990;font-size:8px;white-space:nowrap';
+        row.appendChild(line);
+      }
+      list.appendChild(row);
+    });
+    panel.append(titleRow, description, list);
+    card.appendChild(panel);
+  });
+
   if (spec.kind === 'neural-network' && spec.layers?.length) {
     const diagram = document.createElement('div');
     diagram.style.cssText = 'overflow-x:auto;border:1px solid #e5e7f7;border-radius:9px;background:#fff;padding:7px;margin-bottom:9px';
@@ -969,6 +1028,32 @@ function renderCodeVisualization(spec: CodeVisualizationSpec): HTMLElement {
   return card;
 }
 
+function renderVisualizationRecommendations(ids: string[]): HTMLElement {
+  const recommendations = [...new Set(ids)]
+    .map(id => ({ id, label: getVisualizationLabel(id) }))
+    .filter((item): item is { id: string; label: string } => Boolean(item.label))
+    .slice(0, 5);
+  const panel = document.createElement('section');
+  panel.setAttribute('aria-label', 'Related visualization catalog suggestions');
+  panel.style.cssText = 'margin-top:8px;padding:9px 11px;border:1px solid #e3defe;border-radius:9px;background:#fbfaff';
+  const heading = document.createElement('strong');
+  heading.textContent = 'Related visualization topics';
+  heading.style.cssText = 'display:block;color:#343657;font-size:10px;margin-bottom:5px';
+  const note = document.createElement('div');
+  note.textContent = 'AI suggestions checked against the ModelMind catalog; these labels do not claim runtime results or create another visualization.';
+  note.style.cssText = 'color:#68738a;font-size:9px;line-height:1.4;margin-bottom:6px';
+  const chips = document.createElement('div');
+  chips.style.cssText = 'display:flex;flex-wrap:wrap;gap:5px';
+  recommendations.forEach(({ id, label }) => {
+    const chip = document.createElement('span');
+    chip.textContent = `${label} · ${id}`;
+    chip.style.cssText = 'padding:4px 7px;border:1px solid #e3defe;border-radius:999px;background:#fff;color:#5145cd;font-size:9px';
+    chips.appendChild(chip);
+  });
+  panel.append(heading, note, chips);
+  return panel;
+}
+
 function summarizeCodeStructure(code: string): Array<{ label: string; count: number }> {
   const patterns: Array<[string, RegExp]> = [
     ['Imports', /^\s*(?:import\s+|from\s+\S+\s+import\s+)/gm],
@@ -1057,21 +1142,164 @@ function renderCodeAnimation(
   explanation.textContent = 'Run & trace captures the real path; loops can visit a line multiple times and untaken branches are skipped.';
   const variablePanel = document.createElement('div');
   variablePanel.style.cssText = 'display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:5px;margin-top:8px';
+  const stackPanel = document.createElement('div');
+  stackPanel.style.cssText = 'display:flex;flex-wrap:wrap;align-items:center;gap:5px;margin-top:7px;font-size:10px;color:#475569';
+  const callTreePanel = document.createElement('section');
+  callTreePanel.style.cssText = 'display:none;margin-top:8px;padding:8px 9px;border:1px solid #e2e8f0;border-radius:7px;background:#f8fafc';
+  const arrayPanel = document.createElement('section');
+  arrayPanel.style.cssText = 'display:none;margin-top:8px;padding:8px 9px;border:1px solid #e2e8f0;border-radius:7px;background:#f8fafc';
+  const loopPanel = document.createElement('section');
+  loopPanel.style.cssText = 'display:none;margin-top:8px;padding:8px 9px;border:1px solid #ddd6fe;border-radius:7px;background:#faf9ff';
+  const stateDelta = document.createElement('div');
+  stateDelta.style.cssText = 'font-size:10px;line-height:1.5;color:#475569;margin-top:6px';
   const outputPanel = document.createElement('pre');
   outputPanel.style.cssText = 'display:none;max-height:120px;overflow:auto;white-space:pre-wrap;background:#f8fafc;border:1px solid #edf1f6;border-radius:6px;padding:7px;font:11px/1.4 ui-monospace,monospace;color:#334155';
 
   let events: CodeTraceEvent[] = [];
+  let errorLine: number | undefined;
   let step = 0;
   let timer: ReturnType<typeof setInterval> | undefined;
-  const paint = (): void => {
-    if (events.length === 0) { counter.textContent = 'Run to capture execution'; return; }
+  const renderObservedCallTree = (): void => {
+    interface CallNode { name: string; children: Map<string, CallNode>; }
+    const rootNode: CallNode = { name: 'Notebook cell', children: new Map() };
+    let hasCalls = false;
+    events.forEach(event => {
+      const stack = (event.callStack ?? [event.functionName]).filter(name => name !== '<module>');
+      if (!stack.length) return;
+      hasCalls = true;
+      let parent = rootNode;
+      stack.forEach(name => {
+        let child = parent.children.get(name);
+        if (!child) { child = { name, children: new Map() }; parent.children.set(name, child); }
+        parent = child;
+      });
+    });
+    callTreePanel.replaceChildren();
+    if (!hasCalls) { callTreePanel.style.display = 'none'; return; }
+    callTreePanel.style.display = 'block';
+    const heading = document.createElement('strong'); heading.textContent = 'Observed call / recursion tree';
+    heading.style.cssText = 'display:block;color:#34405a;font-size:10px;margin-bottom:4px';
+    const noteText = document.createElement('div');
+    noteText.textContent = 'Unique stack paths seen during this run. Repeated names indicate observed recursion depth; this is not a count of total function calls.';
+    noteText.style.cssText = 'color:#64748b;font-size:9px;line-height:1.4;margin-bottom:5px';
+    const renderChildren = (node: CallNode, ancestors: string[]): HTMLOListElement => {
+      const list = document.createElement('ol'); list.style.cssText = 'margin:2px 0 2px 14px;padding-left:12px;color:#475569;font-size:10px';
+      node.children.forEach(child => {
+        const item = document.createElement('li');
+        const repeated = ancestors.indexOf(child.name) >= 0;
+        const label = document.createElement('span');
+        label.textContent = `${child.name === '<module>' ? 'cell' : `${child.name}()`}${repeated ? ' · recursive frame' : ''}`;
+        label.style.cssText = repeated ? 'color:#7c3aed;font-weight:700' : 'color:#475569';
+        item.appendChild(label);
+        if (child.children.size) item.appendChild(renderChildren(child, [...ancestors, child.name]));
+        list.appendChild(item);
+      });
+      return list;
+    };
+    callTreePanel.append(heading, noteText, renderChildren(rootNode, []));
+  };
+  const parseNumericArray = (value: string | undefined): number[] | null => {
+    if (!value || !/^\[\s*-?\d/.test(value) || !/^\[.*\]$/.test(value)) return null;
+    const values = value.slice(1, -1).split(',').map(item => item.trim());
+    if (values.length < 2 || values.length > 16 || values.some(item => !/^-?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?$/.test(item))) return null;
+    const numbers = values.map(Number);
+    return numbers.every(Number.isFinite) ? numbers : null;
+  };
+  const renderArraySnapshot = (): void => {
     const active = events[step];
+    const arrays = Object.entries(active?.variables ?? {}).map(([name, value]) => ({ name, values: parseNumericArray(value) })).filter((item): item is { name: string; values: number[] } => item.values !== null);
+    arrayPanel.replaceChildren();
+    if (!arrays.length) { arrayPanel.style.display = 'none'; return; }
+    arrayPanel.style.display = 'block';
+    const sorting = /\bsorted\s*\(|\.sort\s*\(/.test(currentSource);
+    const heading = document.createElement('strong');
+    heading.textContent = sorting ? 'Sorting / array state at this trace step' : 'Captured small numeric arrays';
+    heading.style.cssText = 'display:block;color:#34405a;font-size:10px;margin-bottom:4px';
+    const noteText = document.createElement('div');
+    noteText.textContent = 'Values are captured from the explicitly executed trace; move through steps to compare snapshots.';
+    noteText.style.cssText = 'color:#64748b;font-size:9px;margin-bottom:6px';
+    arrayPanel.append(heading, noteText);
+    const previousValues = step > 0 ? events[step - 1].variables : {};
+    arrays.forEach(({ name, values }) => {
+      const row = document.createElement('div'); row.style.cssText = 'margin-top:6px;padding:6px;border:1px solid #e2e8f0;border-radius:6px;background:#fff';
+      const label = document.createElement('div'); label.textContent = name; label.style.cssText = 'font:10px ui-monospace,monospace;color:#475569;margin-bottom:3px';
+      const previous = parseNumericArray(previousValues[name]);
+      const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      svg.setAttribute('viewBox', '0 0 360 86'); svg.setAttribute('width', '100%'); svg.setAttribute('height', '86');
+      svg.setAttribute('role', 'img'); svg.setAttribute('aria-label', `${name} values captured at trace step ${step + 1}`);
+      const minValue = Math.min(0, ...values); const maxValue = Math.max(0, ...values); const range = maxValue - minValue || 1;
+      const baseline = 8 + (maxValue / range) * 58; const cellWidth = 340 / values.length;
+      const baseLine = document.createElementNS(svg.namespaceURI, 'line');
+      baseLine.setAttribute('x1', '10'); baseLine.setAttribute('x2', '350'); baseLine.setAttribute('y1', String(baseline)); baseLine.setAttribute('y2', String(baseline)); baseLine.setAttribute('stroke', '#94a3b8'); svg.appendChild(baseLine);
+      values.forEach((value, index) => {
+        const yValue = 8 + ((maxValue - value) / range) * 58;
+        const rect = document.createElementNS(svg.namespaceURI, 'rect');
+        rect.setAttribute('x', String(10 + index * cellWidth + 2)); rect.setAttribute('y', String(Math.min(baseline, yValue)));
+        rect.setAttribute('width', String(Math.max(3, cellWidth - 4))); rect.setAttribute('height', String(Math.max(2, Math.abs(baseline - yValue))));
+        const changed = previous && (previous.length !== values.length || previous[index] !== value);
+        rect.setAttribute('fill', changed ? '#f59e0b' : '#7567e8'); rect.setAttribute('rx', '2');
+        const text = document.createElementNS(svg.namespaceURI, 'text');
+        text.setAttribute('x', String(10 + index * cellWidth + cellWidth / 2)); text.setAttribute('y', '82'); text.setAttribute('text-anchor', 'middle');
+        text.setAttribute('font-size', String(Math.min(9, cellWidth * 0.55))); text.setAttribute('fill', '#475569'); text.textContent = String(value);
+        svg.append(rect, text);
+      });
+      row.append(label, svg); arrayPanel.appendChild(row);
+    });
+  };
+  const renderLoopTrace = (): void => {
+    loopPanel.replaceChildren();
+    if (!events.length) { loopPanel.style.display = 'none'; return; }
+    const summary = summarizeLoopTrace(currentSource, events, step);
+    if (!summary) { loopPanel.style.display = 'none'; return; }
+    loopPanel.style.display = 'block';
+    const heading = document.createElement('strong');
+    heading.textContent = 'Observed loop trace';
+    heading.style.cssText = 'display:block;color:#4338ca;font-size:10px;margin-bottom:3px';
+    const source = document.createElement('code');
+    source.textContent = summary.header;
+    source.style.cssText = 'display:block;overflow-wrap:anywhere;color:#334155;font:10px ui-monospace,monospace;margin-bottom:4px';
+    const note = document.createElement('div');
+    note.textContent = `Captured ${summary.visits.length} trace visit(s) at this loop header. These are observed line events; the panel does not infer condition outcomes or claim an iteration total.`;
+    note.style.cssText = 'color:#64748b;font-size:9px;line-height:1.4;margin-bottom:6px';
+    loopPanel.append(heading, source, note);
+    if (summary.capturedVariables.length) {
+      const values = document.createElement('div');
+      values.textContent = `Captured loop variable: ${summary.capturedVariables.join(', ')}`;
+      values.style.cssText = 'color:#475569;font:9px ui-monospace,monospace;margin-bottom:6px';
+      loopPanel.appendChild(values);
+    }
+    const timeline = document.createElement('div');
+    timeline.style.cssText = 'display:flex;flex-wrap:wrap;gap:4px';
+    summary.visits.forEach(({ eventIndex, visitNumber }) => {
+      const jump = document.createElement('button');
+      jump.type = 'button';
+      jump.textContent = `Visit ${visitNumber}`;
+      jump.title = `Jump to captured trace step ${eventIndex + 1}`;
+      jump.setAttribute('aria-label', `Jump to loop header visit ${visitNumber}, trace step ${eventIndex + 1}`);
+      jump.style.cssText = `padding:3px 6px;border:1px solid ${eventIndex === step ? '#7567e8' : '#ddd6fe'};border-radius:999px;background:${eventIndex === step ? '#ede9fe' : '#fff'};color:#5145cd;font-size:9px;cursor:pointer`;
+      jump.addEventListener('click', () => { stop(); step = eventIndex; paint(); });
+      timeline.appendChild(jump);
+    });
+    loopPanel.appendChild(timeline);
+  };
+  const paint = (): void => {
     renderedLines.forEach(row => {
-      const selected = Number(row.dataset.line) === active.line - 1;
-      row.style.background = selected ? 'rgba(109,124,255,.28)' : 'transparent';
+      const lineNumber = Number(row.dataset.line) + 1;
+      row.style.background = lineNumber === errorLine ? 'rgba(239,68,68,.24)' : 'transparent';
+    });
+    if (events.length === 0) {
+      counter.textContent = errorLine ? `Error at line ${errorLine}` : 'Run to capture execution';
+      return;
+    }
+    const active = events[step];
+    const visits = events.slice(0, step + 1).filter(event => event.line === active.line).length;
+    renderedLines.forEach(row => {
+      const lineNumber = Number(row.dataset.line) + 1;
+      const selected = lineNumber === active.line;
+      row.style.background = selected ? 'rgba(109,124,255,.28)' : lineNumber === errorLine ? 'rgba(239,68,68,.24)' : 'transparent';
       if (selected) row.scrollIntoView({ block: 'nearest' });
     });
-    counter.textContent = `Executed step ${step + 1} of ${events.length} · line ${active.line}${active.functionName !== '<module>' ? ` · ${active.functionName}()` : ''}`;
+    counter.textContent = `Executed step ${step + 1} of ${events.length} · line ${active.line} · visited ${visits}×${active.functionName !== '<module>' ? ` · ${active.functionName}()` : ''}`;
     explanation.textContent = `At the start of this line: ${explainSourceLine(lines[active.line - 1] ?? '')}`;
     variablePanel.replaceChildren();
     const entries = Object.entries(active.variables);
@@ -1084,6 +1312,21 @@ function renderCodeAnimation(
       const val = document.createElement('span'); val.textContent = value; val.title = value; val.style.cssText = 'display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font:11px ui-monospace,monospace;color:#0f172a';
       chip.append(key, val); variablePanel.appendChild(chip);
     });
+    stackPanel.replaceChildren();
+    const stackHeading = document.createElement('strong'); stackHeading.textContent = 'Call stack:'; stackPanel.appendChild(stackHeading);
+    (active.callStack?.length ? active.callStack : [active.functionName]).forEach((frameName, index) => {
+      if (index) { const arrow = document.createElement('span'); arrow.textContent = '›'; stackPanel.appendChild(arrow); }
+      const frame = document.createElement('span'); frame.textContent = frameName === '<module>' ? 'cell' : `${frameName}()`;
+      frame.style.cssText = 'padding:3px 6px;border:1px solid #e2e8f0;border-radius:999px;background:#f8fafc';
+      stackPanel.appendChild(frame);
+    });
+    const before = step > 0 ? events[step - 1].variables : {};
+    const changed = Object.entries(active.variables).filter(([name, value]) => before[name] !== value)
+      .map(([name, value]) => `${name}: ${before[name] === undefined ? 'created' : `${before[name]} →`} ${value}`);
+    const removed = Object.keys(before).filter(name => !(name in active.variables)).map(name => `${name}: no longer captured`);
+    stateDelta.textContent = `Variable changes since previous captured step: ${[...changed, ...removed].join(' · ') || 'none among the simple values captured'}`;
+    renderArraySnapshot();
+    renderLoopTrace();
   };
   const stop = (): void => { if (timer) clearInterval(timer); timer = undefined; toggle.textContent = '▶ Play'; toggle.title = 'Play execution trace'; };
   const advance = (): void => { step = Math.min(step + 1, events.length - 1); paint(); };
@@ -1108,9 +1351,15 @@ function renderCodeAnimation(
     if (latestSource !== currentSource) {
       currentSource = latestSource;
       events = [];
+      errorLine = undefined;
       step = 0;
       renderSourceLines();
       variablePanel.replaceChildren();
+      stackPanel.replaceChildren();
+      callTreePanel.replaceChildren(); callTreePanel.style.display = 'none';
+      arrayPanel.replaceChildren(); arrayPanel.style.display = 'none';
+      loopPanel.replaceChildren(); loopPanel.style.display = 'none';
+      stateDelta.textContent = '';
       outputPanel.style.display = 'none';
       counter.textContent = 'Selected cell changed · tracing the new code';
     }
@@ -1125,11 +1374,13 @@ function renderCodeAnimation(
     try {
       const result = await runCodeTrace(latestSource);
       events = result.events.slice(0, 1000);
+      errorLine = result.errorLine;
       step = 0;
+      renderObservedCallTree();
       outputPanel.style.display = result.output || result.error ? 'block' : 'none';
       outputPanel.textContent = [result.output, result.error ? `Execution stopped: ${result.error}` : ''].filter(Boolean).join('\n');
       explanation.textContent = result.error
-        ? `Captured ${events.length} executed steps before the cell stopped with an error.`
+        ? `Captured ${events.length} executed steps before the cell stopped with an error${errorLine ? ` at selected-cell line ${errorLine}` : ''}. The exact source line is highlighted.`
         : `Captured ${events.length} executed steps. Repeated lines show loops; lines Python skipped do not appear.`;
       if (events.length === 0) explanation.textContent += ' No Python line events were captured.';
       paint();
@@ -1139,7 +1390,7 @@ function renderCodeAnimation(
       run.disabled = false; run.textContent = '↻ Run again';
     }
   });
-  root.append(heading, note, controls, codePanel, explanation, variablePanel, outputPanel);
+  root.append(heading, note, controls, codePanel, explanation, stackPanel, callTreePanel, variablePanel, stateDelta, loopPanel, arrayPanel, outputPanel);
   counter.textContent = 'Run to capture execution';
   if (lines.length >= 250) {
     const limitNote = document.createElement('div');
@@ -2940,7 +3191,8 @@ export function createAIChatbotPanel(
           codeProfile: /explain|walk through|what does this code|how does this code/i.test(text) && codeContext
             ? summarizeCodeStructure(codeContext)
             : undefined,
-          codeVisualization: options.codeVisualization
+          codeVisualization: options.codeVisualization,
+          visualizationIds: Array.isArray(result.visualization_ids) ? result.visualization_ids : undefined
         };
         const streamed = await streamAssistantReplyInPlace(typingEl, result.reply, messagesArea);
         if (!streamed) return;

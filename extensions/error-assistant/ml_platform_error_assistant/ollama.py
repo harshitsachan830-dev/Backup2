@@ -46,6 +46,34 @@ OLLAMA_FIX_SCHEMA = {
     "required": ["summary", "candidate_code"],
     "additionalProperties": False,
 }
+SOURCE_VISUALIZATION_IDS = (
+    "pca", "kmeans", "random-forest", "xgboost", "decision-tree", "perceptron",
+    "gradient-boosting", "mlp", "gradient-descent", "linear-regression",
+    "multiple-linear-regression", "logistic-regression", "multiclass-logistic-regression",
+    "knn", "svm", "naive-bayes", "catboost", "lightgbm", "regularization",
+    "polynomial-regression", "adaboost", "voting-stacking", "ensemble-lab", "bagging",
+    "boosting", "C01", "C02", "C03", "C04", "C05", "C06", "C07", "C08", "C09",
+    "C10", "C11", "C12", "D01", "D02", "D03", "D04", "D05", "D06", "D07",
+    "D08", "P01", "P02", "P03", "P04",
+)
+OLLAMA_SOURCE_VISUALIZATION_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "what_code_shows": {"type": "string", "maxLength": 1500},
+        "why_these_steps_are_used": {"type": "string", "maxLength": 1500},
+        "what_this_does_not_establish": {"type": "string", "maxLength": 1500},
+        "visualization_ids": {
+            "type": "array",
+            "items": {"type": "string", "enum": list(SOURCE_VISUALIZATION_IDS)},
+            "maxItems": 5,
+        },
+    },
+    "required": [
+        "what_code_shows", "why_these_steps_are_used",
+        "what_this_does_not_establish", "visualization_ids",
+    ],
+    "additionalProperties": False,
+}
 
 
 @lru_cache(maxsize=1)
@@ -748,10 +776,68 @@ def _source_grounded_fallback(code, source_evidence):
     )
 
 
+def normalize_source_visualization_response(raw_response, code, source_evidence):
+    """Validate structured visual-explanation JSON and render a safe chat response."""
+    try:
+        payload = json.loads(raw_response)
+    except (TypeError, json.JSONDecodeError):
+        payload = None
+
+    required = (
+        "what_code_shows",
+        "why_these_steps_are_used",
+        "what_this_does_not_establish",
+    )
+    expected_keys = set(required) | {"visualization_ids"}
+    raw_ids = payload.get("visualization_ids") if isinstance(payload, dict) else None
+    valid = (
+        isinstance(payload, dict)
+        and set(payload) == expected_keys
+        and isinstance(raw_ids, list)
+        and len(raw_ids) <= 5
+        and all(
+            isinstance(payload.get(key), str)
+            and bool(payload[key].strip())
+            and len(payload[key]) <= 1500
+            for key in required
+        )
+    )
+    if not valid:
+        return {
+            "reply": _source_grounded_fallback(code, source_evidence),
+            "visualization_ids": [],
+            "used_fallback": True,
+        }
+
+    sections = [payload[key].strip() for key in required]
+    formatted = (
+        "### What the code shows\n" + sections[0] + "\n\n"
+        "### Why these steps are used\n" + sections[1] + "\n\n"
+        "### What this does not establish\n" + sections[2]
+    )
+    if _needs_source_grounded_fallback(formatted, code):
+        return {
+            "reply": _source_grounded_fallback(code, source_evidence),
+            "visualization_ids": [],
+            "used_fallback": True,
+        }
+
+    allowed_ids = set(SOURCE_VISUALIZATION_IDS)
+    visualization_ids = list(dict.fromkeys(
+        item for item in raw_ids
+        if isinstance(item, str) and item in allowed_ids
+    ))[:5]
+    return {
+        "reply": formatted,
+        "visualization_ids": visualization_ids,
+        "used_fallback": False,
+    }
+
+
 async def chat_with_ollama(message, history=None, context=None, client=None):
     """
     Conversational chat with Ollama. Supports multi-turn history.
-    Returns plain text (not JSON schema) for richer responses.
+    Returns plain text for ordinary chat and a validated structured explanation in visual mode.
     """
     status = await check_ollama_status(client)
     if status["status"] != "connected":
@@ -784,8 +870,10 @@ async def chat_with_ollama(message, history=None, context=None, client=None):
                 "content": (
                     "SOURCE-GROUNDED VISUAL EXPLANATION MODE. The active-cell source is evidence; "
                     "the static diagram is a source-reading aid and the cell was not executed by this request. "
-                    "Return exactly these three headings and no extra sections: 'What the code shows', "
-                    "'Why these steps are used', and 'What this does not establish'. Keep each section brief. "
+                    "Return only the required JSON object. Write concise strings for what_code_shows, "
+                    "why_these_steps_are_used, and what_this_does_not_establish. Put up to five directly "
+                    "relevant visualization catalog IDs in visualization_ids; use an empty array when none "
+                    "is clearly supported. Never invent IDs or add keys. "
                     "Explain only behavior visible in the code or stable library semantics. Distinguish a call "
                     "written in source from a result measured at runtime. Do not claim that a model was trained, "
                     "evaluated, or validated unless those operations and evidence are present. Do not describe "
@@ -863,6 +951,7 @@ async def chat_with_ollama(message, history=None, context=None, client=None):
                 "num_predict": 1024,
             },
             "messages": chat_messages,
+            **({"format": OLLAMA_SOURCE_VISUALIZATION_SCHEMA} if isinstance(context, dict) and context.get("source_grounded_visualization") is True else {}),
         }
     ).encode("utf-8")
 
@@ -907,15 +996,22 @@ async def chat_with_ollama(message, history=None, context=None, client=None):
     except (json.JSONDecodeError, UnicodeDecodeError, ValueError):
         return {"status": "invalid_model_response", "model_id": model_id}
 
+    visualization_ids = None
     if isinstance(context, dict) and context.get("source_grounded_visualization") is True:
         active_code = context.get("active_code", "")
         active_code = active_code if isinstance(active_code, str) else ""
-        if _needs_source_grounded_fallback(content, active_code):
-            content = _source_grounded_fallback(active_code, context.get("source_evidence"))
+        structured = normalize_source_visualization_response(
+            content, active_code, context.get("source_evidence")
+        )
+        content = structured["reply"]
+        visualization_ids = structured["visualization_ids"]
 
-    return {
+    result = {
         "status": "replied",
         "provider": "ollama",
         "model_id": model_id,
         "reply": content.strip(),
     }
+    if visualization_ids is not None:
+        result["visualization_ids"] = visualization_ids
+    return result

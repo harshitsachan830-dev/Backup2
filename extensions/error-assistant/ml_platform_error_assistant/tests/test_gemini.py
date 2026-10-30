@@ -6,6 +6,7 @@ from ml_platform_error_assistant import gemini as gemini_module
 from ml_platform_error_assistant.gemini import (
     GEMINI_API_BASE_URL,
     GEMINI_TIMEOUT_SECONDS,
+    chat_with_gemini,
     gemini_api_key,
     suggest_fix_with_gemini,
 )
@@ -113,6 +114,67 @@ async def test_gemini_returns_unconfigured_without_sending_request(monkeypatch):
 
     assert result["status"] == "gemini_unconfigured"
     assert client.requests == []
+
+
+@pytest.mark.asyncio
+async def test_source_grounded_gemini_chat_replaces_unstructured_claims_with_grounded_sections(monkeypatch):
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+    client = FakeClient([
+        FakeResponse(
+            200,
+            json_bytes({"candidates": [{"content": {"parts": [{"text": "This improves model accuracy and proves the feature is useful."}]}}]}),
+        )
+    ])
+
+    result = await chat_with_gemini(
+        "Visualize this code",
+        context={
+            "source_grounded_visualization": True,
+            "active_code": "from sklearn.preprocessing import StandardScaler\nscaler = StandardScaler()",
+            "source_evidence": {
+                "facts": ["The source creates a StandardScaler instance."],
+                "limits": ["The source does not fit the scaler or show transformed values."],
+            },
+        },
+        client=client,
+    )
+
+    assert result["status"] == "replied"
+    assert "### What the code shows" in result["reply"]
+    assert "### Why these steps are used" in result["reply"]
+    assert "### What this does not establish" in result["reply"]
+    assert "improves model accuracy" not in result["reply"]
+    assert result["visualization_ids"] == []
+    generation = json.loads(client.requests[0].body)["generationConfig"]
+    assert generation["responseMimeType"] == "application/json"
+    assert generation["responseSchema"]["properties"]["visualization_ids"]["items"]["enum"]
+
+
+@pytest.mark.asyncio
+async def test_source_grounded_gemini_chat_returns_validated_visualization_ids(monkeypatch):
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+    structured = {
+        "what_code_shows": "The source creates a PCA estimator with two components.",
+        "why_these_steps_are_used": "PCA represents numeric input in a lower-dimensional component space when fit and transformed.",
+        "what_this_does_not_establish": "No fitted components or projected rows are shown.",
+        "visualization_ids": ["pca", "unknown"],
+    }
+    client = FakeClient([
+        FakeResponse(200, json_bytes({"candidates": [{"content": {"parts": [{"text": json.dumps(structured)}]}}]}))
+    ])
+
+    result = await chat_with_gemini(
+        "Visualize this code",
+        context={
+            "source_grounded_visualization": True,
+            "active_code": "from sklearn.decomposition import PCA\nmodel = PCA(n_components=2)",
+            "source_evidence": {"facts": ["The source configures PCA with n_components=2."], "limits": []},
+        },
+        client=client,
+    )
+
+    assert result["status"] == "replied"
+    assert result["visualization_ids"] == ["pca"]
 
 
 @pytest.mark.asyncio

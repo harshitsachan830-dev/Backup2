@@ -57,6 +57,7 @@ export default function Dashboard({
     }
     if (
       activeWorkspace === "VideoGPT" ||
+      activeWorkspace === "Practice" ||
       activeWorkspace === "Roadmap" ||
       activeWorkspace === "Dashboard" ||
       activeWorkspace === "Datasets" ||

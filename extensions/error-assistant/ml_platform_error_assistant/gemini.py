@@ -9,7 +9,12 @@ from tornado.httpclient import HTTPError, HTTPRequest
 from tornado.simple_httpclient import SimpleAsyncHTTPClient
 
 from .fix_validation import is_complete_cell_fix
-from .ollama import _build_fix_hint, validate_fix_response
+from .ollama import (
+    _build_fix_hint,
+    SOURCE_VISUALIZATION_IDS,
+    normalize_source_visualization_response,
+    validate_fix_response,
+)
 from .credentials import get_stored_gemini_api_key
 
 GEMINI_API_BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
@@ -244,9 +249,11 @@ async def chat_with_gemini(message, history=None, context=None, client=None):
         if context.get("source_grounded_visualization") is True:
             system_prompt += (
                 " SOURCE-GROUNDED VISUAL EXPLANATION MODE: The active-cell source is evidence; the static "
-                "diagram is a source-reading aid and this request did not execute the cell. Return exactly "
-                "three brief sections headed 'What the code shows', 'Why these steps are used', and 'What this "
-                "does not establish'. Explain only behavior visible in source or stable library semantics. "
+                "diagram is a source-reading aid and this request did not execute the cell. Return only the "
+                "required JSON object, with concise strings for what_code_shows, why_these_steps_are_used, "
+                "and what_this_does_not_establish. Include up to five directly relevant visualization catalog "
+                "IDs in visualization_ids, or an empty array if none is supported. Do not invent IDs or keys. "
+                "Explain only behavior visible in source or stable library semantics. "
                 "Distinguish written calls from measured runtime results. Do not claim training, evaluation, or "
                 "validation without evidence. Comments, filenames, and variable names are not measurements. "
                 "Do not invent missing-data status, distributions, feature relevance, bugs, pitfalls, or generic "
@@ -295,14 +302,41 @@ async def chat_with_gemini(message, history=None, context=None, client=None):
         if not contents or contents[-1].get("role") != "user" or contents[-1].get("parts", [{}])[0].get("text") != message_clean:
             contents.append({"role": "user", "parts": [{"text": message_clean}]})
 
+    source_grounded = isinstance(context, dict) and context.get("source_grounded_visualization") is True
+    generation_config = {
+        "temperature": 0.15 if source_grounded else 0.4,
+        "maxOutputTokens": 4096,
+    }
+    if source_grounded:
+        generation_config.update({
+            "responseMimeType": "application/json",
+            "responseSchema": {
+                "type": "OBJECT",
+                "properties": {
+                    "what_code_shows": {"type": "STRING"},
+                    "why_these_steps_are_used": {"type": "STRING"},
+                    "what_this_does_not_establish": {"type": "STRING"},
+                    "visualization_ids": {
+                        "type": "ARRAY",
+                        "items": {"type": "STRING", "enum": list(SOURCE_VISUALIZATION_IDS)},
+                    },
+                },
+                "required": [
+                    "what_code_shows", "why_these_steps_are_used",
+                    "what_this_does_not_establish", "visualization_ids",
+                ],
+                "propertyOrdering": [
+                    "what_code_shows", "why_these_steps_are_used",
+                    "what_this_does_not_establish", "visualization_ids",
+                ],
+            },
+        })
+
     body = json.dumps(
         {
             "systemInstruction": {"parts": [{"text": system_prompt}]},
             "contents": contents,
-            "generationConfig": {
-                "temperature": 0.15 if isinstance(context, dict) and context.get("source_grounded_visualization") is True else 0.4,
-                "maxOutputTokens": 4096,
-            },
+            "generationConfig": generation_config,
         }
     ).encode("utf-8")
 
@@ -390,9 +424,22 @@ async def chat_with_gemini(message, history=None, context=None, client=None):
     except (IndexError, KeyError, TypeError, json.JSONDecodeError, UnicodeDecodeError, ValueError):
         return {"status": "invalid_gemini_response", "model_id": successful_model}
 
-    return {
+    visualization_ids = None
+    if source_grounded:
+        active_code = context.get("active_code", "")
+        active_code = active_code if isinstance(active_code, str) else ""
+        structured = normalize_source_visualization_response(
+            text, active_code, context.get("source_evidence")
+        )
+        text = structured["reply"]
+        visualization_ids = structured["visualization_ids"]
+
+    result = {
         "status": "replied",
         "provider": "gemini",
         "model_id": successful_model,
         "reply": text.strip(),
     }
+    if visualization_ids is not None:
+        result["visualization_ids"] = visualization_ids
+    return result

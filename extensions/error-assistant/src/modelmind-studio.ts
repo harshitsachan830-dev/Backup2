@@ -19,7 +19,7 @@ import {
   canUseNotebookCodeAction,
   getModelMindNotebookRole
 } from './notebook-mode';
-import type { NotebookCodeAction } from './notebook-mode';
+import type { ModelMindNotebookRole, NotebookCodeAction } from './notebook-mode';
 import {
   IAdvisorModelCode,
   applyTunedModelCode,
@@ -227,6 +227,7 @@ export class ModelMindStudioWidget extends Widget {
   private _dataset: DatasetSummary | null = null;
   private _prepLevel: 'basic' | 'medium' | 'advanced' = 'basic';
   private _trainerMode = false;
+  private _notebookRole: ModelMindNotebookRole = 'modelmind';
   private _preprocessingRequestId = 0;
   private _targetCol = '';
   private _featureCol = '';
@@ -244,9 +245,10 @@ export class ModelMindStudioWidget extends Widget {
     super();
     this._app = app;
     this._notebooks = notebooks;
-    this._trainerMode = getModelMindNotebookRole(
+    this._notebookRole = getModelMindNotebookRole(
       notebooks.currentWidget?.context.model
-    ) === 'trainer';
+    );
+    this._trainerMode = this._notebookRole === 'trainer';
 
     this.id = 'modelmind-studio-sidebar';
     this.title.caption = 'ModelMind Studio';
@@ -265,7 +267,9 @@ export class ModelMindStudioWidget extends Widget {
 
     // Auto-load initial dataset if present
     setTimeout(() => {
-      void this._loadDataset(this._currentPath);
+      if (this._canUseCodeAction('preview')) {
+        void this._loadDataset(this._currentPath);
+      }
     }, 100);
   }
 
@@ -432,28 +436,36 @@ export class ModelMindStudioWidget extends Widget {
   }
 
   refreshNotebookMode(): void {
-    const trainerMode =
-      getModelMindNotebookRole(this._notebooks.currentWidget?.context.model) ===
-      'trainer';
-    if (trainerMode === this._trainerMode) {
+    const notebookRole = getModelMindNotebookRole(
+      this._notebooks.currentWidget?.context.model
+    );
+    const trainerMode = notebookRole === 'trainer';
+    if (notebookRole === this._notebookRole) {
       return;
     }
+    this._notebookRole = notebookRole;
     this._trainerMode = trainerMode;
-    this._notebookModeLabel.textContent = trainerMode
-      ? 'Trainer Notebook · Preview only'
-      : 'ModelMind Notebook';
+    this._notebookModeLabel.textContent =
+      notebookRole === 'trainer'
+        ? 'Trainer Notebook · Preview only'
+        : notebookRole === 'plain'
+          ? 'Plain Practice Notebook · Tools disabled'
+          : 'ModelMind Notebook';
     document.getElementById('mm-code-preview-modal')?.remove();
     this._renderCurrentTab();
   }
 
   private _canUseCodeAction(action: NotebookCodeAction): boolean {
     return canUseNotebookCodeAction(
-      this._trainerMode ? 'trainer' : 'modelmind',
+      this._notebookRole,
       action
     );
   }
 
   private _autoDetectDataset(): void {
+    if (!this._canUseCodeAction('preview')) {
+      return;
+    }
     const cell = this._notebooks.activeCell;
     if (!cell || !isCodeCellModel(cell.model)) {
       this._showToast('Select a notebook cell containing dataset path.');
@@ -475,6 +487,9 @@ export class ModelMindStudioWidget extends Widget {
   // DATA LOAD & API CALLS
   // ═════════════════════════════════════════════════════════════════
   private async _loadDataset(path: string): Promise<void> {
+    if (!this._canUseCodeAction('preview')) {
+      return;
+    }
     this._currentPath = path;
     this._statusPill.textContent = '⏳ Analyzing dataset...';
     this._statusPill.className = 'mm-studio-status-pill loading';

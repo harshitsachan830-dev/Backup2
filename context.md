@@ -1,10 +1,10 @@
 # Build Context
 
-Last updated: 2026-10-26
+Last updated: 2026-10-30
 
-## Version 0.2.6
+## Version 0.2.7
 
-This release updates the ModelMind web workspace with a browsable dataset library, a documentation library for ML learning resources and visualization guides, and expanded project management with editable descriptions/status and per-owner API updates. The private companion installer workflow builds all supported macOS and Windows assets for the `private-companion-v0.2.6` tag.
+This release adds source-grounded Ollama code explanations and visualizations, user-triggered code tracing and animation, a Practice area, and a plain notebook mode without AI or ML Studio tools. The private companion installer workflow builds all supported macOS and Windows assets for the `private-companion-v0.2.7` tag.
 
 ## Source of truth
 

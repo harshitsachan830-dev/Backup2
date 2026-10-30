@@ -57,7 +57,7 @@ app = FastAPI(
     title="ModelMind Backend",
     version="0.3.0",
 )
-NotebookType = Literal["modelmind", "trainer"]
+NotebookType = Literal["modelmind", "trainer", "plain"]
 pending_jupyter_launches: dict[str, tuple[float, NotebookType | None]] = {}
 
 try:
@@ -247,18 +247,25 @@ def _load_jupyter_xsrf_token(
 
 
 def _ensure_jupyter_notebook(server: dict, notebook_type: NotebookType) -> str:
-    filename = (
-        "Trainer-Notebook.ipynb"
-        if notebook_type == "trainer"
-        else "ModelMind-Notebook.ipynb"
-    )
-    title = "Trainer Notebook" if notebook_type == "trainer" else "ModelMind Notebook"
-    intro = (
-        "Use ModelMind Studio to preview generated code, then write and run "
-        "your own solution in the cells below."
-        if notebook_type == "trainer"
-        else "Use the full ModelMind ML Studio workflow to prepare data and build models."
-    )
+    notebook_details = {
+        "modelmind": (
+            "ModelMind-Notebook.ipynb",
+            "ModelMind Notebook",
+            "Use the full ModelMind ML Studio workflow to prepare data and build models.",
+        ),
+        "trainer": (
+            "Trainer-Notebook.ipynb",
+            "Trainer Notebook",
+            "Use ModelMind Studio to preview generated code, then write and run "
+            "your own solution in the cells below.",
+        ),
+        "plain": (
+            "Practice-Notebook.ipynb",
+            "Practice Notebook",
+            "A plain Jupyter notebook for practice. ModelMind AI, debugger, and ML Studio tools are hidden for this notebook.",
+        ),
+    }
+    filename, title, intro = notebook_details[notebook_type]
 
     server_url = server.get("url")
     if not isinstance(server_url, str):

@@ -8,6 +8,7 @@ import { IMainMenu } from '@jupyterlab/mainmenu';
 import type { IError, IOutput } from '@jupyterlab/nbformat';
 import {
   INotebookTracker,
+  type INotebookModel,
   NotebookActions,
   NotebookPanel
 } from '@jupyterlab/notebook';
@@ -19,7 +20,11 @@ import modelMindLogo from '../style/modelmind-logo.png';
 import { applyFixToCellModel } from './fix-utils';
 import { requestAPI } from './request';
 import { createModelMindStudioWidget } from './modelmind-studio';
-import { createFAB as createTutorFAB, loadTutorExplanation } from './debugger-tutor';
+import {
+  createFAB as createTutorFAB,
+  loadTutorExplanation,
+  setTutorEnabled
+} from './debugger-tutor';
 import {
   createAIChatbotPanel,
   type CodeTraceEvent,
@@ -29,7 +34,10 @@ import {
   type TrainingSource
 } from './ai-chatbot';
 import { createAPIKeySettingsWidget } from './api-key-settings';
-import { MODEL_MIND_NOTEBOOK_TYPE } from './notebook-mode';
+import {
+  MODEL_MIND_NOTEBOOK_TYPE,
+  getModelMindNotebookRole
+} from './notebook-mode';
 import type { ModelMindNotebookRole } from './notebook-mode';
 
 const COMMAND_ID = '@ml-platform/error-assistant:open';
@@ -372,6 +380,45 @@ const plugin: JupyterFrontEndPlugin<void> = {
     panel.title.label = 'Error Assistant';
     panel.title.caption = 'Notebook error assistant';
     panel.addClass('ml-platform-error-assistant-panel');
+
+    let connectedNotebookModel: INotebookModel | null = null;
+    const refreshNotebookPresentation = (): void => {
+      const plainNotebook =
+        getModelMindNotebookRole(notebooks.currentWidget?.context.model) ===
+        'plain';
+      const toolWidgets = [panel];
+      for (const widget of toolWidgets) {
+        if (plainNotebook) widget.hide();
+        else widget.show();
+      }
+      setTutorEnabled(!plainNotebook);
+    };
+    let applyNotebookPresentation: () => void = refreshNotebookPresentation;
+    const refreshOnMetadataChange = (): void =>
+      applyNotebookPresentation();
+    const watchNotebookModel = (model: INotebookModel | null): void => {
+      if (connectedNotebookModel) {
+        connectedNotebookModel.metadataChanged.disconnect(
+          refreshOnMetadataChange
+        );
+      }
+      connectedNotebookModel = model;
+      if (connectedNotebookModel) {
+        connectedNotebookModel.metadataChanged.connect(refreshOnMetadataChange);
+      }
+      refreshNotebookPresentation();
+    };
+    notebooks.currentChanged.connect((_, notebook) => {
+      if (!notebook) {
+        watchNotebookModel(null);
+        return;
+      }
+      void notebook.context.ready.then(() => {
+        if (notebooks.currentWidget === notebook) {
+          watchNotebookModel(notebook.context.model);
+        }
+      });
+    });
 
     const shell = document.createElement('div');
     shell.className = 'ml-assistant-shell';
@@ -903,6 +950,12 @@ const plugin: JupyterFrontEndPlugin<void> = {
 
     // ── Redirect listener: switch to AI Assistant when requested by Tutor (<70% confidence) ──
     window.addEventListener('modelmind:open-ai-assistant', (e: any) => {
+      if (
+        getModelMindNotebookRole(notebooks.currentWidget?.context.model) ===
+        'plain'
+      ) {
+        return;
+      }
       app.shell.activateById(panel.id);
       const mode = e?.detail?.mode === 'suggest' ? 'Suggest Fix' : 'Explain Error';
       const targetTab = tabButtons.get(mode) || tabButtons.get('Explain Error');
@@ -942,6 +995,7 @@ const plugin: JupyterFrontEndPlugin<void> = {
       events: CodeTraceEvent[];
       output: string;
       error?: string;
+      errorLine?: number;
     }> => {
       const kernel = notebooks.currentWidget?.sessionContext.session?.kernel;
       if (!kernel || kernel.isDisposed) {
@@ -969,13 +1023,15 @@ def _mm_trace_runner(_mm_source):
                     continue
                 if isinstance(_mm_value, (str, int, float, bool, type(None))):
                     _mm_value_text = repr(_mm_value)
-                elif isinstance(_mm_value, (list, tuple, dict)) and len(_mm_value) <= 8:
+                elif isinstance(_mm_value, (list, tuple, dict)) and len(_mm_value) <= 16:
                     if all(isinstance(_mm_item, (str, int, float, bool, type(None))) for _mm_item in (_mm_value.values() if isinstance(_mm_value, dict) else _mm_value)):
                         _mm_value_text = repr(_mm_value)
                     else:
                         continue
                 elif type(_mm_value).__module__.startswith('pandas') and hasattr(_mm_value, 'shape'):
                     _mm_value_text = '<' + type(_mm_value).__name__ + ' shape=' + str(_mm_value.shape) + '>'
+                elif type(_mm_value).__module__.startswith('numpy') and hasattr(_mm_value, 'shape'):
+                    _mm_value_text = '<' + type(_mm_value).__name__ + ' shape=' + str(_mm_value.shape) + ' dtype=' + str(getattr(_mm_value, 'dtype', 'unknown')) + '>'
                 elif type(_mm_value).__module__.startswith('numpy') and hasattr(_mm_value, 'item'):
                     try:
                         _mm_value_text = repr(_mm_value.item())
@@ -983,10 +1039,16 @@ def _mm_trace_runner(_mm_source):
                         continue
                 else:
                     continue
-                _mm_variables[_mm_name] = _mm_value_text[:100]
+                _mm_variables[_mm_name] = _mm_value_text[:240]
                 if len(_mm_variables) >= 12:
                     break
-            _mm_events.append({'line': frame.f_lineno, 'functionName': frame.f_code.co_name, 'variables': _mm_variables})
+            _mm_stack = []
+            _mm_cursor = frame
+            while _mm_cursor is not None and _mm_cursor.f_code.co_filename == _mm_filename:
+                _mm_stack.append(_mm_cursor.f_code.co_name)
+                _mm_cursor = _mm_cursor.f_back
+            _mm_stack.reverse()
+            _mm_events.append({'line': frame.f_lineno, 'functionName': frame.f_code.co_name, 'variables': _mm_variables, 'callStack': _mm_stack})
         return _mm_trace
 
     _mm_previous_trace = _mm_sys.gettrace()
@@ -994,15 +1056,17 @@ def _mm_trace_runner(_mm_source):
         _mm_sys.settrace(_mm_trace)
         try:
             exec(compile(_mm_source, _mm_filename, 'exec'), get_ipython().user_ns, get_ipython().user_ns)
-            return _mm_events, None
+            return _mm_events, None, None
         except BaseException as _mm_exc:
-            return _mm_events, type(_mm_exc).__name__ + ': ' + str(_mm_exc)
+            import traceback as _mm_traceback
+            _mm_error_line = next((item.lineno for item in reversed(_mm_traceback.extract_tb(_mm_exc.__traceback__)) if item.filename == _mm_filename), None)
+            return _mm_events, type(_mm_exc).__name__ + ': ' + str(_mm_exc), _mm_error_line
     finally:
         _mm_sys.settrace(_mm_previous_trace)
 
-_mm_events, _mm_error = _mm_trace_runner(${JSON.stringify(source)})
-print(${JSON.stringify(marker)} + _mm_json.dumps({'events': _mm_events, 'error': _mm_error}))
-del _mm_events, _mm_error, _mm_trace_runner, _mm_json
+_mm_events, _mm_error, _mm_error_line = _mm_trace_runner(${JSON.stringify(source)})
+print(${JSON.stringify(marker)} + _mm_json.dumps({'events': _mm_events, 'error': _mm_error, 'errorLine': _mm_error_line}))
+del _mm_events, _mm_error, _mm_error_line, _mm_trace_runner, _mm_json
 `;
       let capturedOutput = '';
       const future = kernel.requestExecute({
@@ -1027,11 +1091,13 @@ del _mm_events, _mm_error, _mm_trace_runner, _mm_json
       const payload = JSON.parse(capturedOutput.slice(markerIndex + marker.length).trim()) as {
         events?: CodeTraceEvent[];
         error?: string | null;
+        errorLine?: number | null;
       };
       return {
         events: Array.isArray(payload.events) ? payload.events : [],
         output,
-        error: payload.error || undefined
+        error: payload.error || undefined,
+        errorLine: typeof payload.errorLine === 'number' ? payload.errorLine : undefined
       };
     };
 
@@ -1452,6 +1518,7 @@ for _mm_cleanup in ('_mm_args', '_mm_ns', '_mm_X', '_mm_y', '_mm_bad', '_mm_targ
     chatbotWidget.node.style.cssText = 'height:100%;overflow:hidden;';
     chatbotWidget.node.appendChild(chatbotRoot);
     app.shell.add(chatbotWidget, 'right', { rank: 800 });
+    const modeAwareWidgets = [panel, chatbotWidget];
 
     // ═══════════════════════════════════════════════════════════
     // AUTO-TRIGGER: Fire the Tutor immediately when any cell fails
@@ -1461,6 +1528,12 @@ for _mm_cleanup in ('_mm_args', '_mm_ns', '_mm_X', '_mm_y', '_mm_bad', '_mm_targ
     NotebookActions.executed.connect((_, args) => {
       const { cell, success } = args;
       if (success) return; // only handle failures
+      if (
+        getModelMindNotebookRole(notebooks.currentWidget?.context.model) ===
+        'plain'
+      ) {
+        return;
+      }
 
       setTimeout(() => {
         const error = captureActiveError(cell as NotebookCell);
@@ -1484,6 +1557,7 @@ for _mm_cleanup in ('_mm_args', '_mm_ns', '_mm_X', '_mm_y', '_mm_bad', '_mm_targ
     // ═══════════════════════════════════════════════════════════
     const studioWidget = createModelMindStudioWidget(app, notebooks);
     app.shell.add(studioWidget, 'left', { rank: 300 });
+    modeAwareWidgets.push(studioWidget);
 
     const apiKeyWidget = createAPIKeySettingsWidget(
       app.serviceManager.serverSettings,
@@ -1494,12 +1568,48 @@ for _mm_cleanup in ('_mm_args', '_mm_ns', '_mm_X', '_mm_y', '_mm_bad', '_mm_targ
       'Save Gemini credentials in this computer’s credential store'
     );
     app.shell.add(apiKeyWidget, 'right', { rank: 700 });
+    modeAwareWidgets.push(apiKeyWidget);
+
+    // Plain practice notebooks retain Jupyter's normal editor and kernel while
+    // suppressing all ModelMind-added AI and Studio tools.
+    applyNotebookPresentation = (): void => {
+      const plainNotebook =
+        getModelMindNotebookRole(notebooks.currentWidget?.context.model) ===
+        'plain';
+      for (const widget of modeAwareWidgets) {
+        if (plainNotebook) widget.hide();
+        else widget.show();
+      }
+      refreshNotebookPresentation();
+    };
+    notebooks.currentChanged.connect((_, notebook) => {
+      if (!notebook) {
+        applyNotebookPresentation();
+        return;
+      }
+      for (const widget of modeAwareWidgets) widget.hide();
+      setTutorEnabled(false);
+      void notebook.context.ready.then(() => {
+        if (notebooks.currentWidget === notebook) {
+          watchNotebookModel(notebook.context.model);
+        }
+      });
+    });
+    if (notebooks.currentWidget) {
+      void notebooks.currentWidget.context.ready.then(applyNotebookPresentation);
+    }
 
     const STUDIO_COMMAND = 'modelmind:open-studio';
     app.commands.addCommand(STUDIO_COMMAND, {
       label: 'Open ModelMind Studio',
       caption: 'Open the unified ModelMind ML Studio slide bar in the left panel',
       execute: () => {
+        if (
+          getModelMindNotebookRole(notebooks.currentWidget?.context.model) ===
+          'plain'
+        ) {
+          return;
+        }
         app.shell.activateById(studioWidget.id);
       }
     });
@@ -1521,6 +1631,7 @@ for _mm_cleanup in ('_mm_args', '_mm_ns', '_mm_X', '_mm_y', '_mm_bad', '_mm_targ
       await widget.context.ready;
       widget.context.model.setMetadata(MODEL_MIND_NOTEBOOK_TYPE, role);
       studioWidget.refreshNotebookMode();
+      applyNotebookPresentation();
     };
 
     const MODEL_MIND_NOTEBOOK_COMMAND = 'modelmind:create-modelmind-notebook';
@@ -1535,10 +1646,18 @@ for _mm_cleanup in ('_mm_args', '_mm_ns', '_mm_X', '_mm_y', '_mm_bad', '_mm_targ
       execute: () => createNotebook('trainer')
     });
 
+    const PLAIN_NOTEBOOK_COMMAND = 'modelmind:create-plain-practice-notebook';
+    app.commands.addCommand(PLAIN_NOTEBOOK_COMMAND, {
+      label: 'Plain Practice Notebook',
+      caption: 'Create a standard Jupyter notebook without ModelMind AI or Studio tools',
+      execute: () => createNotebook('plain')
+    });
+
     mainMenu.fileMenu.newMenu.addGroup(
       [
         { command: MODEL_MIND_NOTEBOOK_COMMAND },
-        { command: TRAINER_NOTEBOOK_COMMAND }
+        { command: TRAINER_NOTEBOOK_COMMAND },
+        { command: PLAIN_NOTEBOOK_COMMAND }
       ],
       899
     );
@@ -1641,6 +1760,12 @@ for _mm_cleanup in ('_mm_args', '_mm_ns', '_mm_X', '_mm_y', '_mm_bad', '_mm_targ
     app.commands.addCommand(COMMAND_ID, {
       label: 'Open Error Assistant',
       execute: () => {
+        if (
+          getModelMindNotebookRole(notebooks.currentWidget?.context.model) ===
+          'plain'
+        ) {
+          return;
+        }
         app.shell.activateById(panel.id);
         void setStatus();
       }

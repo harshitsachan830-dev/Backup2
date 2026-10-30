@@ -43,7 +43,7 @@ jobs:
         if: matrix.platform == 'macOS'
         env:
           MODELMIND_PACKAGE_SUFFIX: ${{ matrix.suffix }}
-          MODELMIND_APP_VERSION: "0.2.6"
+          MODELMIND_APP_VERSION: "0.2.7"
         run: |
           bash -n scripts/start-beta-macos.command
           bash -n scripts/start-platform.sh
@@ -53,7 +53,7 @@ jobs:
         shell: pwsh
         env:
           MODELMIND_PACKAGE_SUFFIX: ${{ matrix.suffix }}
-          MODELMIND_APP_VERSION: "0.2.6"
+          MODELMIND_APP_VERSION: "0.2.7"
         run: |
           $tokens = $null
           $errors = $null
@@ -99,9 +99,9 @@ jobs:
       - name: Create release notes
         run: |
           cat << 'EOF' > release-notes.md
-          ## What's updated in 0.2.6
+          ## What's updated in 0.2.7
 
-          The ModelMind workspace adds a browsable dataset library, a searchable documentation library for ML resources and visualizations, and expanded project management with editable project details and status. The new project endpoints validate updates and enforce authenticated ownership. The updated web workspace builds successfully.
+          This release adds source-grounded code explanations and visualizations to the Ollama-powered notebook chatbot, including a user-triggered Run & trace flow for runtime animation. It also adds the Practice area and a plain ModelMind notebook mode for practice without AI or ML Studio tools. ModelMind and Trainer notebooks share the chatbot while preserving Trainer's preview-only notebook code actions.
 
           ## ModelMind Installers & User Guide
 
