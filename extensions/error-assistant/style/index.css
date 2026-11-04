@@ -680,6 +680,32 @@
 }
 
 /* ═══════════════════════════════════════════════════════════
+   NOTEBOOK PRESENTATION RULES (STUDIO VS PRACTICE SEPARATION)
+   ═══════════════════════════════════════════════════════════ */
+
+/* In regular ModelMind Notebook (NOT in Practice): hide Practice tab and panel */
+body:not(.mm-practice-modelmind-notebook) .jp-SideBar.jp-mod-left .lm-TabBar-tab[data-id="modelmind-practice-questions"],
+body:not(.mm-practice-modelmind-notebook) #modelmind-practice-questions,
+body.mm-regular-modelmind-notebook .jp-SideBar.jp-mod-left .lm-TabBar-tab[data-id="modelmind-practice-questions"],
+body.mm-regular-modelmind-notebook #modelmind-practice-questions {
+  display: none !important;
+}
+
+/* In ModelMind Practice Notebook: hide ML Studio tab and panel */
+body.mm-practice-modelmind-notebook .jp-SideBar.jp-mod-left .lm-TabBar-tab[data-id="modelmind-studio-sidebar"],
+body.mm-practice-modelmind-notebook #modelmind-studio-sidebar {
+  display: none !important;
+}
+
+/* In Plain Notebook: hide both ML Studio and Practice */
+body.mm-plain-modelmind-notebook .jp-SideBar.jp-mod-left .lm-TabBar-tab[data-id="modelmind-studio-sidebar"],
+body.mm-plain-modelmind-notebook .jp-SideBar.jp-mod-left .lm-TabBar-tab[data-id="modelmind-practice-questions"],
+body.mm-plain-modelmind-notebook #modelmind-studio-sidebar,
+body.mm-plain-modelmind-notebook #modelmind-practice-questions {
+  display: none !important;
+}
+
+/* ═══════════════════════════════════════════════════════════
    MODELMIND STUDIO — CLEAN LIGHT THEME (MATCHING AI ASSISTANT)
    ═══════════════════════════════════════════════════════════ */
 

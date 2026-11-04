@@ -117,6 +117,16 @@ if (-not (Test-Path $jupyter) -or $SetupOnly -or $env:MODELMIND_SETUP_ONLY -eq "
     & $python -m pip install --upgrade pip
     & $python -m pip install -r (Join-Path $root "requirements.txt")
     & $python -m pip install -r (Join-Path $root "modelmind-source\backend\requirements.txt")
+} else {
+    $mlLibsInstalled = $false
+    try {
+        & $python -c "import xgboost, catboost, lightgbm, shap, optuna, sklearn, seaborn" *> $null
+        if ($LASTEXITCODE -eq 0) { $mlLibsInstalled = $true }
+    } catch { }
+    if (-not $mlLibsInstalled) {
+        Write-Host "Installing required Machine Learning libraries (xgboost, lightgbm, catboost, shap, optuna, etc.)..."
+        & $python -m pip install -r (Join-Path $root "requirements.txt")
+    }
 }
 
 $extensionCheckScript = Join-Path $root "scripts\check-extension-wheel.py"

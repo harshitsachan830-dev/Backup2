@@ -77,6 +77,9 @@ if [[ ! -x "$JUPYTER_BIN" || "${MODELMIND_SETUP_ONLY:-0}" == "1" ]]; then
   "$PYTHON_BIN" -m pip install --upgrade pip
   "$PYTHON_BIN" -m pip install -r "$ROOT_DIR/requirements.txt"
   "$PYTHON_BIN" -m pip install -r "$ROOT_DIR/modelmind-source/backend/requirements.txt"
+elif ! "$PYTHON_BIN" -c "import xgboost, catboost, lightgbm, shap, optuna, sklearn, seaborn" >/dev/null 2>&1; then
+  echo "Installing required Machine Learning libraries (xgboost, lightgbm, catboost, shap, optuna, etc.)..."
+  "$PYTHON_BIN" -m pip install -r "$ROOT_DIR/requirements.txt"
 fi
 
 # User data virtual environments persist across app upgrades. Refresh the

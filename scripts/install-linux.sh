@@ -115,7 +115,7 @@ fi
 printf "→ Fetching latest release info from GitHub... "
 LATEST_TAG="$(curl -fsSL "https://api.github.com/repos/${REPO}/releases" 2>/dev/null | grep '"tag_name":' | head -n 1 | sed -E 's/.*"([^"]+)".*/\1/' || true)"
 if [[ -z "$LATEST_TAG" ]]; then
-  LATEST_TAG="private-companion-v0.3.2"
+  LATEST_TAG="private-companion-v0.3.3"
 fi
 printf "${COLOR_GREEN}%s${COLOR_RESET}\n" "$LATEST_TAG"
 
@@ -147,16 +147,15 @@ if [[ ! -x "$VENV_DIR/bin/python" ]]; then
 fi
 
 "$VENV_DIR/bin/python" -m pip install --upgrade pip --quiet
-printf "→ Installing dependencies (JupyterLab, FastAPI, Uvicorn, ML libraries)... "
+printf "→ Installing dependencies and ML libraries (numpy, pandas, scipy, scikit-learn, xgboost, lightgbm, catboost, imbalanced-learn, statsmodels, joblib, matplotlib, seaborn, plotly, shap, optuna)... "
+if [[ -f "$INSTALL_DIR/requirements.txt" ]]; then
+  "$VENV_DIR/bin/python" -m pip install --quiet -r "$INSTALL_DIR/requirements.txt"
+fi
+if [[ -f "$INSTALL_DIR/modelmind-source/backend/requirements.txt" ]]; then
+  "$VENV_DIR/bin/python" -m pip install --quiet -r "$INSTALL_DIR/modelmind-source/backend/requirements.txt"
+fi
 "$VENV_DIR/bin/python" -m pip install --quiet \
-  jupyterlab~=4.2.0 \
-  fastapi~=0.115.0 \
-  "uvicorn[standard]>=0.30.0" \
-  requests~=2.32.0 \
-  pydantic~=2.9.0 \
-  pandas \
-  scikit-learn \
-  numpy
+  numpy pandas scipy scikit-learn xgboost lightgbm catboost imbalanced-learn statsmodels joblib matplotlib seaborn plotly shap optuna
 printf "${COLOR_GREEN}Done${COLOR_RESET}\n"
 
 # Install custom ModelMind Error Assistant Wheel

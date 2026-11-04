@@ -410,14 +410,26 @@ const plugin: JupyterFrontEndPlugin<void> = {
       const plainNotebookStyles = document.createElement('style');
       plainNotebookStyles.id = 'mm-plain-notebook-styles';
       plainNotebookStyles.textContent = `
-        body.mm-plain-modelmind-notebook
-          #jp-main-content-panel > .jp-SideArea[data-side="right"] {
+        /* In regular ModelMind Notebook (NOT in Practice): hide Practice tab and panel */
+        body:not(.mm-practice-modelmind-notebook) .jp-SideBar.jp-mod-left .lm-TabBar-tab[data-id="modelmind-practice-questions"],
+        body:not(.mm-practice-modelmind-notebook) #modelmind-practice-questions,
+        body.mm-regular-modelmind-notebook .jp-SideBar.jp-mod-left .lm-TabBar-tab[data-id="modelmind-practice-questions"],
+        body.mm-regular-modelmind-notebook #modelmind-practice-questions {
           display: none !important;
         }
-        body.mm-plain-modelmind-notebook
-          .jp-SideBar.jp-mod-left
-          .lm-TabBar-tab[data-id="modelmind-studio-sidebar"],
+
+        /* In ModelMind Practice Notebook: hide ML Studio tab and panel */
+        body.mm-practice-modelmind-notebook .jp-SideBar.jp-mod-left .lm-TabBar-tab[data-id="modelmind-studio-sidebar"],
+        body.mm-practice-modelmind-notebook #modelmind-studio-sidebar {
+          display: none !important;
+        }
+
+        /* In Plain Notebook: hide right sidebar, ML Studio tab, and Practice tab */
+        body.mm-plain-modelmind-notebook #jp-main-content-panel > .jp-SideArea[data-side="right"],
+        body.mm-plain-modelmind-notebook .jp-SideBar.jp-mod-left .lm-TabBar-tab[data-id="modelmind-studio-sidebar"],
+        body.mm-plain-modelmind-notebook .jp-SideBar.jp-mod-left .lm-TabBar-tab[data-id="modelmind-practice-questions"],
         body.mm-plain-modelmind-notebook #modelmind-studio-sidebar,
+        body.mm-plain-modelmind-notebook #modelmind-practice-questions,
         body.mm-plain-modelmind-notebook #mm-tutor-fab,
         body.mm-plain-modelmind-notebook #mm-tutor-panel,
         body.mm-plain-modelmind-notebook #mm-tutor-overlay {
@@ -434,9 +446,14 @@ const plugin: JupyterFrontEndPlugin<void> = {
         ?.dataset.id ?? null;
     let connectedNotebookModel: INotebookModel | null = null;
     const refreshNotebookPresentation = (): void => {
-      const role = getModelMindNotebookRole(notebooks.currentWidget?.context.model);
+      const currentWidget = notebooks.currentWidget;
+      const role = getModelMindNotebookRole(
+        currentWidget?.context.model,
+        currentWidget?.context.path
+      );
       const plainNotebook = role === 'plain';
       const practiceNotebook = role === 'practice';
+      const regularNotebook = !plainNotebook && !practiceNotebook;
       const hideStudioTools = plainNotebook || practiceNotebook;
       for (const widget of modeAwareWidgets) {
         if (hideStudioTools) widget.hide();
@@ -450,6 +467,11 @@ const plugin: JupyterFrontEndPlugin<void> = {
         if (practiceNotebook) widget.show();
         else widget.hide();
       }
+
+      document.body.classList.toggle('mm-plain-modelmind-notebook', plainNotebook);
+      document.body.classList.toggle('mm-practice-modelmind-notebook', practiceNotebook);
+      document.body.classList.toggle('mm-regular-modelmind-notebook', regularNotebook);
+
       if (plainNotebook) {
         // Workspace restoration can reselect a saved sidebar after notebook
         // metadata is read. Capture the user's normal layout only after that
@@ -462,48 +484,51 @@ const plugin: JupyterFrontEndPlugin<void> = {
             rightActiveId: getActiveSidebarId('right')
           };
         }
-        document.body.classList.add('mm-plain-modelmind-notebook');
-        document.body.classList.remove('mm-practice-modelmind-notebook');
         if (
           !shellLayout.leftCollapsed &&
-          getActiveSidebarId('left') === 'modelmind-studio-sidebar'
+          (getActiveSidebarId('left') === 'modelmind-studio-sidebar' ||
+           getActiveSidebarId('left') === 'modelmind-practice-questions')
         ) {
           app.shell.activateById('filebrowser');
         }
       } else if (practiceNotebook) {
-        document.body.classList.remove('mm-plain-modelmind-notebook');
-        document.body.classList.add('mm-practice-modelmind-notebook');
-        if (practiceQuestionsWidget && !shellLayout.leftCollapsed) {
-          app.shell.activateById(practiceQuestionsWidget.id);
+        // In practice notebook: ML studio is hidden. Switch left sidebar if currently on studio.
+        if (getActiveSidebarId('left') === 'modelmind-studio-sidebar') {
+          if (practiceQuestionsWidget) {
+            app.shell.activateById(practiceQuestionsWidget.id);
+          } else {
+            app.shell.activateById('filebrowser');
+          }
         }
         if (!shellLayout.rightCollapsed && chatbotWidgets[0]) {
           app.shell.activateById(chatbotWidgets[0].id);
         }
-      } else if (previousSidebarState) {
-        document.body.classList.remove('mm-plain-modelmind-notebook');
-        document.body.classList.remove('mm-practice-modelmind-notebook');
-        if (previousSidebarState.leftCollapsed) {
-          shellLayout.collapseLeft?.();
-        } else if (previousSidebarState.leftActiveId) {
-          // Only restore if the user hasn't manually switched to a different tab.
-          // Don't override a tab the user has explicitly clicked (e.g. Upload/Files).
-          const currentLeftId = getActiveSidebarId('left');
-          const isStillOnModelmindStudio =
-            currentLeftId === null ||
-            currentLeftId === 'modelmind-studio-sidebar';
-          if (isStillOnModelmindStudio) {
-            app.shell.activateById(previousSidebarState.leftActiveId);
-          }
-        }
-        if (previousSidebarState.rightCollapsed) {
-          shellLayout.collapseRight?.();
-        } else if (previousSidebarState.rightActiveId) {
-          app.shell.activateById(previousSidebarState.rightActiveId);
-        }
-        previousSidebarState = null;
       } else {
-        document.body.classList.remove('mm-plain-modelmind-notebook');
-        document.body.classList.remove('mm-practice-modelmind-notebook');
+        // In regular ModelMind notebook: Practice questions panel is hidden. Switch left sidebar if currently on practice.
+        if (getActiveSidebarId('left') === 'modelmind-practice-questions') {
+          app.shell.activateById('modelmind-studio-sidebar');
+        } else if (previousSidebarState) {
+          if (previousSidebarState.leftCollapsed) {
+            shellLayout.collapseLeft?.();
+          } else if (
+            previousSidebarState.leftActiveId &&
+            previousSidebarState.leftActiveId !== 'modelmind-practice-questions'
+          ) {
+            const currentLeftId = getActiveSidebarId('left');
+            const isStillOnModelmindStudio =
+              currentLeftId === null ||
+              currentLeftId === 'modelmind-studio-sidebar';
+            if (isStillOnModelmindStudio) {
+              app.shell.activateById(previousSidebarState.leftActiveId);
+            }
+          }
+          if (previousSidebarState.rightCollapsed) {
+            shellLayout.collapseRight?.();
+          } else if (previousSidebarState.rightActiveId) {
+            app.shell.activateById(previousSidebarState.rightActiveId);
+          }
+          previousSidebarState = null;
+        }
       }
       setTutorEnabled(!hideStudioTools);
     };
@@ -1739,7 +1764,8 @@ for _mm_cleanup in ('_mm_args', '_mm_ns', '_mm_X', '_mm_y', '_mm_bad', '_mm_targ
           // but only if a non-studio tab was active (i.e. the user picked it).
           if (
             userChosenLeftTab &&
-            userChosenLeftTab !== 'modelmind-studio-sidebar'
+            userChosenLeftTab !== 'modelmind-studio-sidebar' &&
+            userChosenLeftTab !== 'modelmind-practice-questions'
           ) {
             // Give the DOM one tick to settle before restoring user's tab.
             requestAnimationFrame(() => {

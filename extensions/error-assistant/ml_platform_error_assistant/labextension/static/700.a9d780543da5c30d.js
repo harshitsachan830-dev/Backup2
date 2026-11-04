@@ -1,9 +1,9 @@
-"use strict";(self.rspackChunk_ml_platform_error_assistant=self.rspackChunk_ml_platform_error_assistant||[]).push([[700],{475(t,a,e){var r=e(601),o=e.n(r),i=e(314),s=(e.n(i))()(o());s.push([t.id,`/*
+"use strict";(self.rspackChunk_ml_platform_error_assistant=self.rspackChunk_ml_platform_error_assistant||[]).push([[700],{475(t,a,e){var o=e(601),r=e.n(o),i=e(314),s=(e.n(i))()(r());s.push([t.id,`/*
     See the JupyterLab Developer Guide for useful CSS Patterns:
 
     https://jupyterlab.readthedocs.io/en/stable/developer/css.html
 */
-`,""]),e.d(a,{},{A:s})},646(t,a,e){var r=e(601),o=e.n(r),i=e(314),s=e.n(i),n=e(475),l=e(417),d=e.n(l),p=new URL(e(665),e.b),m=s()(o());m.i(n.A);var f=d()(p);m.push([t.id,`:root {
+`,""]),e.d(a,{},{A:s})},646(t,a,e){var o=e(601),r=e.n(o),i=e(314),s=e.n(i),n=e(475),d=e(417),l=e.n(d),p=new URL(e(665),e.b),m=s()(r());m.i(n.A);var c=l()(p);m.push([t.id,`:root {
   --ml-assistant-panel-bg: #f5f6f8;
   --ml-assistant-card-bg: #fff;
   --ml-assistant-border: #dfe3ea;
@@ -57,7 +57,7 @@
   flex: 0 0 30px;
   width: 30px;
   height: 30px;
-  background: url(${f}) center / contain no-repeat;
+  background: url(${c}) center / contain no-repeat;
   content: '';
 }
 
@@ -679,6 +679,32 @@
 
 /* Hide default rotated lumino label */
 .jp-SideBar.jp-mod-left .lm-TabBar-tabLabel {
+  display: none !important;
+}
+
+/* ═══════════════════════════════════════════════════════════
+   NOTEBOOK PRESENTATION RULES (STUDIO VS PRACTICE SEPARATION)
+   ═══════════════════════════════════════════════════════════ */
+
+/* In regular ModelMind Notebook (NOT in Practice): hide Practice tab and panel */
+body:not(.mm-practice-modelmind-notebook) .jp-SideBar.jp-mod-left .lm-TabBar-tab[data-id="modelmind-practice-questions"],
+body:not(.mm-practice-modelmind-notebook) #modelmind-practice-questions,
+body.mm-regular-modelmind-notebook .jp-SideBar.jp-mod-left .lm-TabBar-tab[data-id="modelmind-practice-questions"],
+body.mm-regular-modelmind-notebook #modelmind-practice-questions {
+  display: none !important;
+}
+
+/* In ModelMind Practice Notebook: hide ML Studio tab and panel */
+body.mm-practice-modelmind-notebook .jp-SideBar.jp-mod-left .lm-TabBar-tab[data-id="modelmind-studio-sidebar"],
+body.mm-practice-modelmind-notebook #modelmind-studio-sidebar {
+  display: none !important;
+}
+
+/* In Plain Notebook: hide both ML Studio and Practice */
+body.mm-plain-modelmind-notebook .jp-SideBar.jp-mod-left .lm-TabBar-tab[data-id="modelmind-studio-sidebar"],
+body.mm-plain-modelmind-notebook .jp-SideBar.jp-mod-left .lm-TabBar-tab[data-id="modelmind-practice-questions"],
+body.mm-plain-modelmind-notebook #modelmind-studio-sidebar,
+body.mm-plain-modelmind-notebook #modelmind-practice-questions {
   display: none !important;
 }
 
@@ -1477,4 +1503,4 @@
   font-size: 11px;
   color: #64748b;
 }
-`,""]),e.d(a,{},{A:m})},314(t){t.exports=function(t){var a=[];return a.toString=function(){return this.map(function(a){var e="",r=void 0!==a[5];return a[4]&&(e+="@supports (".concat(a[4],") {")),a[2]&&(e+="@media ".concat(a[2]," {")),r&&(e+="@layer".concat(a[5].length>0?" ".concat(a[5]):""," {")),e+=t(a),r&&(e+="}"),a[2]&&(e+="}"),a[4]&&(e+="}"),e}).join("")},a.i=function(t,e,r,o,i){"string"==typeof t&&(t=[[null,t,void 0]]);var s={};if(r)for(var n=0;n<this.length;n++){var l=this[n][0];null!=l&&(s[l]=!0)}for(var d=0;d<t.length;d++){var p=[].concat(t[d]);r&&s[p[0]]||(void 0!==i&&(void 0===p[5]||(p[1]="@layer".concat(p[5].length>0?" ".concat(p[5]):""," {").concat(p[1],"}")),p[5]=i),e&&(p[2]&&(p[1]="@media ".concat(p[2]," {").concat(p[1],"}")),p[2]=e),o&&(p[4]?(p[1]="@supports (".concat(p[4],") {").concat(p[1],"}"),p[4]=o):p[4]="".concat(o)),a.push(p))}},a}},417(t){t.exports=function(t,a){return(a||(a={}),t&&(t=String(t.__esModule?t.default:t),/^['"].*['"]$/.test(t)&&(t=t.slice(1,-1)),a.hash&&(t+=a.hash),/["'() \t\n]|(%20)/.test(t)||a.needQuotes))?'"'.concat(t.replace(/"/g,'\\"').replace(/\n/g,"\\n"),'"'):t}},601(t){t.exports=function(t){return t[1]}},72(t){var a=[];function e(t){for(var e=-1,r=0;r<a.length;r++)if(a[r].identifier===t){e=r;break}return e}function r(t,r){for(var o={},i=[],s=0;s<t.length;s++){var n=t[s],l=r.base?n[0]+r.base:n[0],d=o[l]||0,p="".concat(l," ").concat(d);o[l]=d+1;var m=e(p),f={css:n[1],media:n[2],sourceMap:n[3],supports:n[4],layer:n[5]};if(-1!==m)a[m].references++,a[m].updater(f);else{var c=function(t,a){var e=a.domAPI(a);return e.update(t),function(a){a?(a.css!==t.css||a.media!==t.media||a.sourceMap!==t.sourceMap||a.supports!==t.supports||a.layer!==t.layer)&&e.update(t=a):e.remove()}}(f,r);r.byIndex=s,a.splice(s,0,{identifier:p,updater:c,references:1})}i.push(p)}return i}t.exports=function(t,o){var i=r(t=t||[],o=o||{});return function(t){t=t||[];for(var s=0;s<i.length;s++){var n=e(i[s]);a[n].references--}for(var l=r(t,o),d=0;d<i.length;d++){var p=e(i[d]);0===a[p].references&&(a[p].updater(),a.splice(p,1))}i=l}}},659(t){var a={};t.exports=function(t,e){var r=function(t){if(void 0===a[t]){var e=document.querySelector(t);if(window.HTMLIFrameElement&&e instanceof window.HTMLIFrameElement)try{e=e.contentDocument.head}catch(t){e=null}a[t]=e}return a[t]}(t);if(!r)throw Error("Couldn't find a style target. This probably means that the value for the 'insert' parameter is invalid.");r.appendChild(e)}},540(t){t.exports=function(t){var a=document.createElement("style");return t.setAttributes(a,t.attributes),t.insert(a,t.options),a}},56(t,a,e){t.exports=function(t){var a=e.nc;a&&t.setAttribute("nonce",a)}},825(t){t.exports=function(t){if("u"<typeof document)return{update:function(){},remove:function(){}};var a=t.insertStyleElement(t);return{update:function(e){var r,o,i;r="",e.supports&&(r+="@supports (".concat(e.supports,") {")),e.media&&(r+="@media ".concat(e.media," {")),(o=void 0!==e.layer)&&(r+="@layer".concat(e.layer.length>0?" ".concat(e.layer):""," {")),r+=e.css,o&&(r+="}"),e.media&&(r+="}"),e.supports&&(r+="}"),(i=e.sourceMap)&&"u">typeof btoa&&(r+="\n/*# sourceMappingURL=data:application/json;base64,".concat(btoa(unescape(encodeURIComponent(JSON.stringify(i))))," */")),t.styleTagTransform(r,a,t.options)},remove:function(){var t;null===(t=a).parentNode||t.parentNode.removeChild(t)}}}},113(t){t.exports=function(t,a){if(a.styleSheet)a.styleSheet.cssText=t;else{for(;a.firstChild;)a.removeChild(a.firstChild);a.appendChild(document.createTextNode(t))}}},959(t,a,e){var r=e(72),o=e.n(r),i=e(825),s=e.n(i),n=e(659),l=e.n(n),d=e(56),p=e.n(d),m=e(540),f=e.n(m),c=e(113),b=e.n(c),x=e(646),u={};u.styleTagTransform=b(),u.setAttributes=p(),u.insert=l().bind(null,"head"),u.domAPI=s(),u.insertStyleElement=f(),o()(x.A,u),x.A&&x.A.locals&&x.A.locals},665(t,a,e){t.exports=e.p+"68c5c2a70ed031f3.png"}}]);
+`,""]),e.d(a,{},{A:m})},314(t){t.exports=function(t){var a=[];return a.toString=function(){return this.map(function(a){var e="",o=void 0!==a[5];return a[4]&&(e+="@supports (".concat(a[4],") {")),a[2]&&(e+="@media ".concat(a[2]," {")),o&&(e+="@layer".concat(a[5].length>0?" ".concat(a[5]):""," {")),e+=t(a),o&&(e+="}"),a[2]&&(e+="}"),a[4]&&(e+="}"),e}).join("")},a.i=function(t,e,o,r,i){"string"==typeof t&&(t=[[null,t,void 0]]);var s={};if(o)for(var n=0;n<this.length;n++){var d=this[n][0];null!=d&&(s[d]=!0)}for(var l=0;l<t.length;l++){var p=[].concat(t[l]);o&&s[p[0]]||(void 0!==i&&(void 0===p[5]||(p[1]="@layer".concat(p[5].length>0?" ".concat(p[5]):""," {").concat(p[1],"}")),p[5]=i),e&&(p[2]&&(p[1]="@media ".concat(p[2]," {").concat(p[1],"}")),p[2]=e),r&&(p[4]?(p[1]="@supports (".concat(p[4],") {").concat(p[1],"}"),p[4]=r):p[4]="".concat(r)),a.push(p))}},a}},417(t){t.exports=function(t,a){return(a||(a={}),t&&(t=String(t.__esModule?t.default:t),/^['"].*['"]$/.test(t)&&(t=t.slice(1,-1)),a.hash&&(t+=a.hash),/["'() \t\n]|(%20)/.test(t)||a.needQuotes))?'"'.concat(t.replace(/"/g,'\\"').replace(/\n/g,"\\n"),'"'):t}},601(t){t.exports=function(t){return t[1]}},72(t){var a=[];function e(t){for(var e=-1,o=0;o<a.length;o++)if(a[o].identifier===t){e=o;break}return e}function o(t,o){for(var r={},i=[],s=0;s<t.length;s++){var n=t[s],d=o.base?n[0]+o.base:n[0],l=r[d]||0,p="".concat(d," ").concat(l);r[d]=l+1;var m=e(p),c={css:n[1],media:n[2],sourceMap:n[3],supports:n[4],layer:n[5]};if(-1!==m)a[m].references++,a[m].updater(c);else{var f=function(t,a){var e=a.domAPI(a);return e.update(t),function(a){a?(a.css!==t.css||a.media!==t.media||a.sourceMap!==t.sourceMap||a.supports!==t.supports||a.layer!==t.layer)&&e.update(t=a):e.remove()}}(c,o);o.byIndex=s,a.splice(s,0,{identifier:p,updater:f,references:1})}i.push(p)}return i}t.exports=function(t,r){var i=o(t=t||[],r=r||{});return function(t){t=t||[];for(var s=0;s<i.length;s++){var n=e(i[s]);a[n].references--}for(var d=o(t,r),l=0;l<i.length;l++){var p=e(i[l]);0===a[p].references&&(a[p].updater(),a.splice(p,1))}i=d}}},659(t){var a={};t.exports=function(t,e){var o=function(t){if(void 0===a[t]){var e=document.querySelector(t);if(window.HTMLIFrameElement&&e instanceof window.HTMLIFrameElement)try{e=e.contentDocument.head}catch(t){e=null}a[t]=e}return a[t]}(t);if(!o)throw Error("Couldn't find a style target. This probably means that the value for the 'insert' parameter is invalid.");o.appendChild(e)}},540(t){t.exports=function(t){var a=document.createElement("style");return t.setAttributes(a,t.attributes),t.insert(a,t.options),a}},56(t,a,e){t.exports=function(t){var a=e.nc;a&&t.setAttribute("nonce",a)}},825(t){t.exports=function(t){if("u"<typeof document)return{update:function(){},remove:function(){}};var a=t.insertStyleElement(t);return{update:function(e){var o,r,i;o="",e.supports&&(o+="@supports (".concat(e.supports,") {")),e.media&&(o+="@media ".concat(e.media," {")),(r=void 0!==e.layer)&&(o+="@layer".concat(e.layer.length>0?" ".concat(e.layer):""," {")),o+=e.css,r&&(o+="}"),e.media&&(o+="}"),e.supports&&(o+="}"),(i=e.sourceMap)&&"u">typeof btoa&&(o+="\n/*# sourceMappingURL=data:application/json;base64,".concat(btoa(unescape(encodeURIComponent(JSON.stringify(i))))," */")),t.styleTagTransform(o,a,t.options)},remove:function(){var t;null===(t=a).parentNode||t.parentNode.removeChild(t)}}}},113(t){t.exports=function(t,a){if(a.styleSheet)a.styleSheet.cssText=t;else{for(;a.firstChild;)a.removeChild(a.firstChild);a.appendChild(document.createTextNode(t))}}},959(t,a,e){var o=e(72),r=e.n(o),i=e(825),s=e.n(i),n=e(659),d=e.n(n),l=e(56),p=e.n(l),m=e(540),c=e.n(m),f=e(113),b=e.n(f),x=e(646),u={};u.styleTagTransform=b(),u.setAttributes=p(),u.insert=d().bind(null,"head"),u.domAPI=s(),u.insertStyleElement=c(),r()(x.A,u),x.A&&x.A.locals&&x.A.locals},665(t,a,e){t.exports=e.p+"68c5c2a70ed031f3.png"}}]);

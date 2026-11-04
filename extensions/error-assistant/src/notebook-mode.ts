@@ -8,11 +8,24 @@ export interface NotebookMetadataReader {
 }
 
 export function getModelMindNotebookRole(
-  model?: NotebookMetadataReader | null
+  model?: NotebookMetadataReader | null,
+  pathOrTitle?: string | null
 ): ModelMindNotebookRole {
   const role = model?.getMetadata(MODEL_MIND_NOTEBOOK_TYPE);
   if (role === 'trainer' || role === 'plain' || role === 'practice') {
     return role;
+  }
+  if (pathOrTitle) {
+    const lower = pathOrTitle.toLowerCase();
+    if (lower.includes('practice')) {
+      return 'practice';
+    }
+    if (lower.includes('plain')) {
+      return 'plain';
+    }
+    if (lower.includes('trainer')) {
+      return 'trainer';
+    }
   }
   return 'modelmind';
 }
