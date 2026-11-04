@@ -43,7 +43,7 @@ jobs:
         if: matrix.platform == 'macOS'
         env:
           MODELMIND_PACKAGE_SUFFIX: ${{ matrix.suffix }}
-          MODELMIND_APP_VERSION: "0.2.9"
+          MODELMIND_APP_VERSION: "0.3.0"
         run: |
           bash -n scripts/start-beta-macos.command
           bash -n scripts/start-platform.sh
@@ -54,7 +54,7 @@ jobs:
         shell: pwsh
         env:
           MODELMIND_PACKAGE_SUFFIX: ${{ matrix.suffix }}
-          MODELMIND_APP_VERSION: "0.2.9"
+          MODELMIND_APP_VERSION: "0.3.0"
         run: |
           python scripts/check-extension-wheel.py
           $tokens = $null
@@ -101,9 +101,13 @@ jobs:
       - name: Create release notes
         run: |
           cat << 'EOF' > release-notes.md
-          ## What's updated in 0.2.9
+          ## What's updated in 0.3.0
 
-          Open a clean Jupyter workspace named **Plain ModelMind Notebook** from the Notebook and Practice pages. Its ModelMind AI, debugger, API-key, and ML Studio panels stay hidden while it is active, and the previous sidebar layout returns when switching to a regular notebook. Existing Practice notebooks are preserved and renamed on first open. The extension is updated to v0.1.4 so installed apps refresh the new frontend assets. This release carries forward v0.2.8 installer upgrade fixes and the v0.2.7 chatbot visualizations, user-triggered Run & trace, and Practice area.
+          - **Enhanced Model Advisor Explanations**: Multi-reason educational explanations (3–5 concrete bullet points) explaining why each model candidate was selected or ranked.
+          - **Inline Cell Error Diagnostics**: Real-time error highlight within code cells with gutter indicator and detailed diagnostic card positioned inside proper cell output borders.
+          - **Sidebar Usability & Sizing**: Responsive 340px / 350px default sidebar widths with preserved user sizing, enhanced tab labels ("Error Assistant", "AI Chat", "API Key"), and reliable single-click sidebar navigation.
+          - **Classified Visualizations Hub**: Interactive 6-domain ML model taxonomy (Classification, Regression, Ensemble & Boosting, Clustering, Deep Learning, Optimization) with search and pixel-perfect card alignment.
+          - **Updated Extension Wheel & Backend**: Extension wheel v0.1.4 refreshed with all new frontend/backend assets and verified against release guardrails.
 
           ## ModelMind Installers & User Guide
 

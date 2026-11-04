@@ -160,16 +160,37 @@ describe('@ml-platform/error-assistant', () => {
     expect(code).toContain('fillna(df["Annual Income"].median())');
   });
 
-  it('explains model-specific rationale using the measured CV result', () => {
+  it('gives a concise model-specific reason and retains detailed CV evidence', () => {
     const extraTrees = buildMeasuredModelExplanation({
       name: 'Extra Trees',
       task: 'classification',
       metric: 'Balanced accuracy',
       score: 0.7613,
       scoreStd: 0.0249,
+      comparisonName: 'XGBoost Classifier',
+      comparisonScore: 0.765,
+      comparisonStd: 0.02,
       rank: 2,
       finalistCount: 5,
       candidateCount: 12,
+      cvFolds: 3,
+      rowsAvailable: 1000,
+      rowsEvaluated: 1000,
+      numericFeatureCount: 10,
+      categoricalFeatureCount: 0,
+      featureMissingCount: 0
+    });
+    const xgboost = buildMeasuredModelExplanation({
+      name: 'XGBoost Classifier',
+      task: 'classification',
+      metric: 'Balanced accuracy',
+      score: 0.765,
+      scoreStd: 0.02,
+      comparisonName: 'Extra Trees',
+      comparisonScore: 0.7613,
+      comparisonStd: 0.0249,
+      rank: 1,
+      finalistCount: 5,
       cvFolds: 3
     });
     const decisionTree = buildMeasuredModelExplanation({
@@ -182,16 +203,24 @@ describe('@ml-platform/error-assistant', () => {
       cvFolds: 3
     });
 
-    expect(extraTrees.why).toContain('extra-randomized split thresholds');
-    expect(extraTrees.why).toContain(
-      '#2 of 5 successfully evaluated finalists'
-    );
+    expect(extraTrees.why.split('\n')).toHaveLength(5);
+    expect(extraTrees.why).toContain('Result: #2/5');
+    expect(extraTrees.why).toContain('randomized trees');
     expect(extraTrees.why).toContain('76.13%');
-    expect(extraTrees.why).toContain('2.49 percentage points');
-    expect(extraTrees.why).toContain('12 screened candidates');
-    expect(extraTrees.why).toContain('not a promise');
-    expect(decisionTree.why).toContain('if/then splits');
+    expect(extraTrees.why).toContain('1,000 rows');
+    expect(extraTrees.why).toContain('no missing inputs');
+    expect(extraTrees.why).toContain('behind XGBoost Classifier');
+    expect(extraTrees.why).toContain('within fold variation');
+    expect(extraTrees.evidence.length).toBeGreaterThan(0);
+    expect(extraTrees.confidence).toContain('separate holdout set');
+    expect(xgboost.why.split('\n')).toHaveLength(4);
+    expect(xgboost.why).toContain('ahead of Extra Trees');
+    expect(xgboost.why).toContain('Top-scoring tested finalist');
+    expect(decisionTree.why).toContain('if/then rules');
     expect(decisionTree.why).not.toBe(extraTrees.why);
+    expect(extraTrees.reasons.length).toBeGreaterThanOrEqual(3);
+    expect(xgboost.reasons.length).toBeGreaterThanOrEqual(3);
+    expect(decisionTree.reasons.length).toBeGreaterThanOrEqual(3);
   });
 
   it('explains selected tuning parameters and supports unlisted settings', () => {

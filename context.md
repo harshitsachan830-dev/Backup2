@@ -1,6 +1,94 @@
 # Build Context
 
-Last updated: 2026-10-30
+Last updated: 2026-11-03
+
+## 2026-11-03 handoff: expanded Practice Studio
+
+### Completed in this workspace
+
+- Practice question bank expanded from **423** to **2,251 unique questions**.
+  The approved external curriculum supplied 1,828 additional entries; all IDs
+  were unique against the original bank.
+- Current public classification is **793 coding/debugging**, **608 AI concept
+  review**, and **850 exact-answer** exercises.
+- Every imported item was normalized to the ModelMind schema with a topic,
+  Basic/Medium/Advanced level, title, prompt, tags where supplied, and a
+  coding editor scaffold where relevant.
+- MCQs and numerical questions retain their server-only answer keys and are
+  deterministic exact checks. Public browser JSON contains no answer key,
+  reference solution, or import provenance.
+- Quality audit passed: no duplicate IDs/content, missing required fields,
+  invalid MCQ indexes, malformed numeric answer keys, or public-field leaks.
+- The Practice Jupyter sidebar separates **Coding & debugging**, **AI concept
+  review**, and **Quick exact checks**, and uses the ModelMind Studio visual
+  system. The Practice notebook keeps standard Jupyter editing and the AI
+  Chatbot, while hiding ML Studio-specific tools.
+- AI review prompt now grades only requirements stated in a coding prompt.
+  Correct code must receive **5/5** without losing marks solely for optional
+  comments, a training loop, or extra explanation.
+- Verification performed: `node --check scripts/build-practice-question-bank.mjs`,
+  Python syntax validation for `routes.py`, focused Next lint/build, and the
+  live notebook endpoint returning all 2,251 questions.
+
+### Important grading boundary
+
+The source curriculum does **not** contain complete executable test
+specifications for all coding exercises. Do not claim that the 793 coding
+questions have hidden tests. They currently use AI rubric review unless and
+until a private judge test set exists for that exact question.
+
+`practice-judge/` already provides a Docker-only, token-protected private
+service with **26** test-backed exercises. The Next.js route
+`modelmind-source/app/api/practice/grade/route.ts` is prepared to call it
+through `PRACTICE_JUDGE_URL` and `PRACTICE_JUDGE_TOKEN`. It must be deployed
+on a private network and tested before enabling automatic code execution.
+Never run learner submissions directly inside Jupyter Server, the Next.js
+process, or a public Render service.
+
+### Files changed for the question-bank work
+
+- `scripts/build-practice-question-bank.mjs` — validates and builds the
+  browser-safe export; supports `--import-directory` for future approved
+  curricula; includes targeted quality corrections.
+- `modelmind-source/data/modelmind-practice-private.json` — 2,251-question
+  private source of truth; contains answer keys only for server-side grading.
+- `modelmind-source/public/modelmind-practice-questions.json` — safe public
+  projection used by the web and Jupyter Practice panel.
+- `extensions/error-assistant/src/practice-questions.ts` — left Practice
+  panel UI and grouped classification display.
+- `extensions/error-assistant/ml_platform_error_assistant/routes.py` — public
+  question API plus exact and AI review routing.
+- `modelmind-source/lib/practice.ts` and
+  `modelmind-source/app/api/practice/grade/route.ts` — web-side schema and
+  isolated-judge integration contract.
+
+### Resume checklist for another platform
+
+1. Preserve the dirty worktree; do not reset or stage unrelated files.
+2. Start the web app with `npm run dev -- --hostname 127.0.0.1 --port 3000`
+   from `modelmind-source`.
+3. Start Jupyter with `PORT=8901 ./scripts/start-platform.sh` from the repo
+   root, then open the Practice notebook link below.
+4. Hard refresh the browser after an extension rebuild (`Cmd+Shift+R` on
+   macOS) so the cached labextension is replaced.
+5. Before adding test badges, deploy `practice-judge` privately, set matching
+   strong `PRACTICE_JUDGE_TOKEN` values in the judge and web app, and execute
+   both passing and failing submissions. Do not expose the judge port.
+6. Add test specifications gradually, beginning with deterministic Python,
+   NumPy, Pandas, and basic scikit-learn contracts. Each test-backed exercise
+   needs explicit input, output, edge cases, and hidden tests.
+
+### Current developer-machine links
+
+- Home: `http://127.0.0.1:3000`
+- ModelMind notebook: `http://127.0.0.1:8901/lab/tree/ModelMind-Notebook.ipynb`
+- Practice notebook: `http://127.0.0.1:8901/lab/tree/ModelMind-Practice-Notebook.ipynb`
+
+The host and port are local-only and can differ on another machine.
+
+## Version 0.3.0
+
+This release delivers multi-reason Model Advisor explanations (3–5 concrete bullet points explaining model selection and ranking), inline cell error diagnostics with code line highlights and proper border-aligned error cards, refined sidebar widths (340px ML Studio, 350px right rail) with persistent sizing and reliable single-click navigation, and a categorized 6-domain Visualizations hub with search and pixel-perfect card alignment. The extension wheel v0.1.4 is refreshed with all new frontend/backend assets and passes all release guardrails.
 
 ## Version 0.2.9
 

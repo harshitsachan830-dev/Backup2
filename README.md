@@ -14,6 +14,59 @@ The full ModelMind Notebook workflow includes ML Studio preprocessing at Basic, 
 
 See [context.md](context.md) for the report-derived phase checklist, implementation decisions, verified environment facts, and next action. Update it and this README whenever a phase, dependency pin, security decision, or supported-platform result changes.
 
+## Current handoff: Practice Studio question bank (2026-11-03)
+
+The ModelMind Practice Studio now contains **2,251 unique questions**. The
+bank was quality-audited for required fields, duplicate IDs/content, invalid
+MCQ keys, and accidental public answer-key exposure.
+
+| Practice mode | Count | How it is checked |
+| --- | ---: | --- |
+| Coding / debugging | 793 | AI teacher review by Ollama or Gemini; it must not be described as test-passed unless the private judge is connected. |
+| AI concept review | 608 | Ollama or Gemini gives a rubric-based rating and feedback. |
+| Exact answer | 850 | MCQ and numerical answers are checked deterministically on the server. |
+
+The current bank is built from the private source
+`modelmind-source/data/modelmind-practice-private.json`. The browser-safe
+export is `modelmind-source/public/modelmind-practice-questions.json`; it
+intentionally excludes correct options, numerical answers, reference solutions,
+and private provenance. Rebuild it with:
+
+```sh
+node scripts/build-practice-question-bank.mjs
+```
+
+To import future approved curriculum files without overwriting existing
+questions, use:
+
+```sh
+node scripts/build-practice-question-bank.mjs --import-directory /path/to/ModelMInd_More_Practise
+```
+
+### Coding-test safety boundary
+
+The repository includes `practice-judge/`, a private Docker-only judge with
+26 test-backed exercises. It is deliberately not exposed to the browser or
+the public internet. The web grading route already expects a private judge at
+`PRACTICE_JUDGE_URL` with a matching `PRACTICE_JUDGE_TOKEN`; configure and
+deploy that service on an internal network before enabling any `testsAvailable`
+badge. Do **not** run arbitrary learner code in the Jupyter server process or
+label the remaining coding questions as test-backed. Add a complete input /
+output contract and hidden tests to each exercise before expanding automated
+coverage.
+
+### Local review links
+
+When started with the documented launch scripts, current developer-machine
+links are:
+
+- Web app: `http://127.0.0.1:3000`
+- ModelMind notebook: `http://127.0.0.1:8901/lab/tree/ModelMind-Notebook.ipynb`
+- Practice notebook: `http://127.0.0.1:8901/lab/tree/ModelMind-Practice-Notebook.ipynb`
+
+These ports are local to the machine running the processes and may change if
+they are already in use.
+
 ## Requirements
 
 - Python with `venv` and `pip`. The developer machine currently has Python 3.14.2; the project's minimum supported Python version has not yet been certified.

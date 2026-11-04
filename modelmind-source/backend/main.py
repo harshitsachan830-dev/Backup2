@@ -57,7 +57,7 @@ app = FastAPI(
     title="ModelMind Backend",
     version="0.3.0",
 )
-NotebookType = Literal["modelmind", "trainer", "plain"]
+NotebookType = Literal["modelmind", "trainer", "plain", "practice"]
 pending_jupyter_launches: dict[str, tuple[float, NotebookType | None]] = {}
 
 try:
@@ -263,6 +263,11 @@ def _ensure_jupyter_notebook(server: dict, notebook_type: NotebookType) -> str:
             "Plain-ModelMind-Notebook.ipynb",
             "Plain ModelMind Notebook",
             "A clean Jupyter notebook for coding practice. ModelMind AI, debugger, API-key, and ML Studio panels are hidden while this notebook is active.",
+        ),
+        "practice": (
+            "ModelMind-Practice-Notebook.ipynb",
+            "ModelMind Practice Notebook",
+            "Choose a question from the Practice Questions panel, write your answer in the cell below, then ask the AI teacher to review it.",
         ),
     }
     filename, title, intro = notebook_details[notebook_type]

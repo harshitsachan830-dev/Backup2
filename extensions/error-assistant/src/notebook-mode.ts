@@ -1,6 +1,6 @@
 export const MODEL_MIND_NOTEBOOK_TYPE = 'modelmind_notebook_type';
 
-export type ModelMindNotebookRole = 'modelmind' | 'trainer' | 'plain';
+export type ModelMindNotebookRole = 'modelmind' | 'trainer' | 'plain' | 'practice';
 export type NotebookCodeAction = 'preview' | 'copy' | 'insert';
 
 export interface NotebookMetadataReader {
@@ -11,7 +11,7 @@ export function getModelMindNotebookRole(
   model?: NotebookMetadataReader | null
 ): ModelMindNotebookRole {
   const role = model?.getMetadata(MODEL_MIND_NOTEBOOK_TYPE);
-  if (role === 'trainer' || role === 'plain') {
+  if (role === 'trainer' || role === 'plain' || role === 'practice') {
     return role;
   }
   return 'modelmind';

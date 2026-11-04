@@ -23,6 +23,19 @@
   border-left: 1px solid var(--ml-assistant-border);
 }
 
+/* ── Default sidebar widths ──
+   Sets a good default. JupyterLab's split-panel still lets the user
+   drag to resize freely — inline style from dragging overrides CSS. */
+#jp-left-stack {
+  min-width: 280px;
+  width: 340px;
+}
+
+#jp-right-stack {
+  min-width: 280px;
+  width: 350px;
+}
+
 [id='jp-MainLogo'] {
   display: flex;
   flex: 0 0 auto;
@@ -193,20 +206,27 @@
 
 .ml-assistant-tab-row {
   display: flex;
-  gap: 4px;
-  overflow-x: auto;
+  gap: 3px;
+  flex-wrap: nowrap;
+  overflow: visible;
   border-bottom: 1px solid var(--ml-assistant-border);
   padding-bottom: 4px;
 }
 
 .ml-assistant-tab {
-  flex: 0 0 auto;
+  flex: 1 1 0;
+  min-width: 0;
   background: transparent;
   border: none;
   border-radius: 6px 6px 0 0;
-  padding: 8px 9px;
+  padding: 7px 4px;
   color: var(--ml-assistant-muted);
   font-weight: 500;
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: center;
 }
 
 .ml-assistant-tab.active {

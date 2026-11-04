@@ -2959,6 +2959,21 @@ export function createAIChatbotPanel(
     helpers.appendChild(btn);
   });
 
+  // The practice notebook chooses a question in its left rail. This button
+  // keeps answer checking inside the familiar Ollama/Gemini chat panel rather
+  // than adding a second, confusing checker elsewhere in the UI.
+  let selectedPracticeQuestionId = '';
+  let selectedPracticeQuestionTitle = '';
+  const practiceReviewButton = document.createElement('button');
+  practiceReviewButton.className = 'mm-chat-helper-btn';
+  practiceReviewButton.textContent = '✅ Check this answer';
+  practiceReviewButton.disabled = true;
+  practiceReviewButton.title = 'Choose a practice question first';
+  practiceReviewButton.addEventListener('click', () => {
+    void checkPracticeAnswer();
+  });
+  helpers.appendChild(practiceReviewButton);
+
   const clearBtn = document.createElement('button');
   clearBtn.className = 'mm-chatbot-clear-btn';
   clearBtn.textContent = '🗑 Clear';
@@ -3252,7 +3267,123 @@ export function createAIChatbotPanel(
     }
   }
 
+  async function checkPracticeAnswer(): Promise<void> {
+    const answer = (attachedCode || getActiveCode()).trim();
+    if (!selectedPracticeQuestionId) {
+      return;
+    }
+    if (!answer) {
+      const errMsg: ChatMessage = {
+        role: 'assistant',
+        content: 'Write your answer or code in the active answer cell before checking it.',
+        timestamp: new Date(),
+        isError: true,
+        provider: currentProvider
+      };
+      messages.push(errMsg);
+      appendMessage(errMsg);
+      return;
+    }
+    if (isTyping) return;
+
+    isTyping = true;
+    sendBtn.disabled = true;
+    practiceReviewButton.disabled = true;
+    const userMsg: ChatMessage = {
+      role: 'user',
+      content: `Check my answer: ${selectedPracticeQuestionTitle || 'practice question'}`,
+      timestamp: new Date(),
+      provider: currentProvider
+    };
+    messages.push(userMsg);
+    appendMessage(userMsg);
+    const typingMsg: ChatMessage = {
+      role: 'assistant',
+      content: '',
+      provider: currentProvider,
+      timestamp: new Date(),
+      isStreaming: true
+    };
+    const typingEl = appendMessage(typingMsg);
+
+    try {
+      const result = await requestAPI<{
+        status: string;
+        reply?: string;
+        provider?: ChatProvider | 'exact';
+        message?: string;
+      }>('api/practice/review', settings, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          question_id: selectedPracticeQuestionId,
+          answer,
+          provider: currentProvider
+        })
+      });
+      if (result.status === 'replied' && result.reply) {
+        const replyMsg: ChatMessage = {
+          role: 'assistant',
+          content: result.reply,
+          provider: result.provider === 'gemini' ? 'gemini' : currentProvider,
+          timestamp: new Date()
+        };
+        const streamed = await streamAssistantReplyInPlace(typingEl, result.reply, messagesArea);
+        if (streamed) {
+          typingEl.replaceWith(createMessageBubble(replyMsg, runCodeTrace, getActiveCode, loadDecisionTrees, loadNeuralNetworks, trainModel));
+          messages.push(replyMsg);
+        }
+      } else {
+        typingEl.remove();
+        const message = result.status === 'gemini_unconfigured'
+          ? 'Gemini must be configured before opening Practice Questions. Switch to Ollama or configure Gemini in a regular ModelMind notebook.'
+          : result.message || 'The practice review could not be completed.';
+        const errMsg: ChatMessage = {
+          role: 'assistant',
+          content: `⚠️ ${message}`,
+          timestamp: new Date(),
+          isError: true,
+          provider: currentProvider
+        };
+        messages.push(errMsg);
+        appendMessage(errMsg);
+      }
+    } catch (error) {
+      typingEl.remove();
+      const errMsg: ChatMessage = {
+        role: 'assistant',
+        content: `⚠️ ${error instanceof Error ? error.message : 'Could not reach the practice review service.'}`,
+        timestamp: new Date(),
+        isError: true,
+        provider: currentProvider
+      };
+      messages.push(errMsg);
+      appendMessage(errMsg);
+    } finally {
+      isTyping = false;
+      sendBtn.disabled = false;
+      practiceReviewButton.disabled = !selectedPracticeQuestionId;
+      textarea.focus();
+    }
+  }
+
   sendBtn.addEventListener('click', () => { void sendMessage(); });
+
+  window.addEventListener('modelmind:practice-question-selected', event => {
+    const detail = (event as CustomEvent<{ question?: {
+      id?: string;
+      title?: string;
+      question?: string;
+      type?: string;
+      gradingMode?: string;
+    } }>).detail;
+    const question = detail?.question;
+    if (!question?.question || !question.id) return;
+    selectedPracticeQuestionId = question.id;
+    selectedPracticeQuestionTitle = question.title || 'selected practice question';
+    practiceReviewButton.disabled = false;
+    practiceReviewButton.title = `Check: ${question.title || 'selected practice question'}`;
+  });
 
   textarea.addEventListener('keydown', (e: KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {

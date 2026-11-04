@@ -243,7 +243,7 @@ def test_jupyter_open_rejects_missing_or_replayed_launch_id():
     assert "open notebook from modelmind" in no_id_response.text.lower()
 
 
-def test_jupyter_open_does_not_redirect_to_an_unauthenticated_server(monkeypatch):
+def test_jupyter_open_redirects_to_open_access_server(monkeypatch):
     def running_server(**kwargs):
         assert kwargs["runtime_dir"]
         return iter(
@@ -268,8 +268,8 @@ def test_jupyter_open_does_not_redirect_to_an_unauthenticated_server(monkeypatch
         headers={"Origin": "null"},
         follow_redirects=False,
     )
-    assert response.status_code == 503
-    assert "authentication is not configured" in response.text.lower()
+    assert response.status_code == 303
+    assert response.headers["location"] == "http://127.0.0.1:8899/lab/"
 
 
 def test_cors_preflight_advertises_only_a_configured_dashboard_origin():

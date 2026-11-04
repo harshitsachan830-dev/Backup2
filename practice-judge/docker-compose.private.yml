@@ -1,0 +1,24 @@
+services:
+  practice-judge:
+    build: .
+    restart: unless-stopped
+    environment:
+      PRACTICE_JUDGE_TOKEN: ${PRACTICE_JUDGE_TOKEN:?set a long random secret}
+    expose:
+      - "8010"
+    networks:
+      - modelmind-internal
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    pids_limit: 64
+    mem_limit: 768m
+    cpus: 1.0
+
+networks:
+  modelmind-internal:
+    internal: true

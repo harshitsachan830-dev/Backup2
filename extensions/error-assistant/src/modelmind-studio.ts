@@ -30,7 +30,10 @@ import {
   buildDatasetLoadingCode,
   buildFullPreprocessingCode
 } from './preprocessing-code-utils';
-import { buildMeasuredModelExplanation } from './model-advisor-explanations';
+import {
+  buildMeasuredModelExplanation,
+  getModelSelectionReasons
+} from './model-advisor-explanations';
 import { explainTuningParameter } from './tuning-explanations';
 
 export interface DatasetSummary {
@@ -2694,6 +2697,7 @@ export class ModelMindStudioWidget extends Widget {
                       : 'Classification'
                   ],
                   why: explanation.why,
+                  reasons: explanation.reasons,
                   why_evidence: explanation.evidence,
                   why_confidence: explanation.confidence,
                   strengths: explanation.strengths,
@@ -3622,10 +3626,117 @@ export class ModelMindStudioWidget extends Widget {
     const whyHeading = document.createElement('div');
     whyHeading.textContent = '✅ Why this model';
     whyHeading.style.cssText =
-      'color:#15803d;font-weight:800;font-size:12px;margin-bottom:4px;';
+      'color:#15803d;font-weight:800;font-size:12.5px;margin-bottom:6px;display:flex;align-items:center;gap:5px;';
+    
     const whySummary = document.createElement('div');
-    whySummary.textContent = String(model.why ?? '');
-    whySummary.style.color = '#166534';
+    whySummary.style.cssText = 'display:flex;flex-direction:column;gap:5px;margin-top:4px;';
+    const rawWhy = String(model.why ?? '');
+    const lines = rawWhy.split('\n').filter(l => l.trim().length > 0);
+    const modelReasons: string[] =
+      Array.isArray(model.reasons) && model.reasons.length > 0
+        ? model.reasons
+        : getModelSelectionReasons(String(model.name ?? ''), {
+            name: String(model.name ?? ''),
+            task:
+              model.automl_task === 'regression' || model.task === 'regression'
+                ? 'regression'
+                : 'classification',
+            metric: '',
+            rank: model.rank ?? 1,
+            finalistCount: 5,
+            targetColumn: targetCol
+          });
+
+    if (lines.length > 1) {
+      lines.forEach(line => {
+        const row = document.createElement('div');
+        row.style.cssText =
+          'display:flex;align-items:flex-start;gap:6px;font-size:11px;line-height:1.5;';
+        let icon = '•';
+        let label = '';
+        let val = line;
+
+        if (line.startsWith('Result:')) {
+          icon = '📊';
+          label = 'Score & Rank:';
+          val = line.slice(7).trim();
+          row.innerHTML = `<span style="flex-shrink:0;font-size:11px;">${icon}</span><div style="color:#166534;"><strong style="color:#15803d;font-weight:700;">${label}</strong> ${val}</div>`;
+          whySummary.appendChild(row);
+        } else if (line.startsWith('Model fit:')) {
+          if (modelReasons.length > 0) {
+            row.style.cssText = 'margin:3px 0 4px 0;';
+            const bulletItems = modelReasons
+              .map(
+                (r: string) =>
+                  `<div style="display:flex;align-items:flex-start;gap:6px;color:#166534;font-size:11px;line-height:1.45;"><span style="color:#15803d;font-weight:800;flex-shrink:0;">•</span><span>${r}</span></div>`
+              )
+              .join('');
+            row.innerHTML = `
+              <div style="width:100%;">
+                <div style="display:flex;align-items:center;gap:6px;margin-bottom:3px;">
+                  <span style="flex-shrink:0;font-size:11px;">🧠</span>
+                  <strong style="color:#15803d;font-weight:750;font-size:11.5px;">Why this model was selected:</strong>
+                </div>
+                <div style="display:flex;flex-direction:column;gap:3px;padding-left:18px;">
+                  ${bulletItems}
+                </div>
+              </div>
+            `;
+            whySummary.appendChild(row);
+          } else {
+            icon = '🧠';
+            label = 'Why this model:';
+            val = line.slice(10).trim();
+            row.innerHTML = `<span style="flex-shrink:0;font-size:11px;">${icon}</span><div style="color:#166534;"><strong style="color:#15803d;font-weight:700;">${label}</strong> ${val}</div>`;
+            whySummary.appendChild(row);
+          }
+        } else if (line.startsWith('Data:')) {
+          icon = '📁';
+          label = 'Dataset match:';
+          val = line.slice(5).trim();
+          row.innerHTML = `<span style="flex-shrink:0;font-size:11px;">${icon}</span><div style="color:#166534;"><strong style="color:#15803d;font-weight:700;">${label}</strong> ${val}</div>`;
+          whySummary.appendChild(row);
+        } else if (line.startsWith('Comparison:')) {
+          icon = '⚖️';
+          label = 'Benchmark:';
+          val = line.slice(11).trim();
+          row.innerHTML = `<span style="flex-shrink:0;font-size:11px;">${icon}</span><div style="color:#166534;"><strong style="color:#15803d;font-weight:700;">${label}</strong> ${val}</div>`;
+          whySummary.appendChild(row);
+        } else if (line.startsWith('Decision:')) {
+          icon = '🎯';
+          label = 'Next step:';
+          val = line.slice(9).trim();
+          row.innerHTML = `<span style="flex-shrink:0;font-size:11px;">${icon}</span><div style="color:#166534;"><strong style="color:#15803d;font-weight:700;">${label}</strong> ${val}</div>`;
+          whySummary.appendChild(row);
+        }
+      });
+    } else if (modelReasons.length > 0) {
+      const heading = document.createElement('div');
+      heading.style.cssText =
+        'display:flex;align-items:center;gap:6px;margin-bottom:4px;';
+      heading.innerHTML = `<span style="flex-shrink:0;font-size:11px;">🧠</span><strong style="color:#15803d;font-weight:750;font-size:11.5px;">Why this model was selected:</strong>`;
+      const list = document.createElement('div');
+      list.style.cssText =
+        'display:flex;flex-direction:column;gap:3px;padding-left:18px;';
+      list.innerHTML = modelReasons
+        .map(
+          (r: string) =>
+            `<div style="display:flex;align-items:flex-start;gap:6px;color:#166534;font-size:11px;line-height:1.45;"><span style="color:#15803d;font-weight:800;flex-shrink:0;">•</span><span>${r}</span></div>`
+        )
+        .join('');
+      whySummary.append(heading, list);
+      if (rawWhy) {
+        const fallback = document.createElement('div');
+        fallback.style.cssText =
+          'color:#166534;font-size:10.5px;margin-top:4px;';
+        fallback.textContent = rawWhy;
+        whySummary.appendChild(fallback);
+      }
+    } else {
+      whySummary.textContent = rawWhy;
+      whySummary.style.color = '#166534';
+      whySummary.style.whiteSpace = 'pre-line';
+    }
     whyEl.append(whyHeading, whySummary);
 
     if (
@@ -3633,30 +3744,35 @@ export class ModelMindStudioWidget extends Widget {
       Array.isArray(model.why_evidence) &&
       model.why_evidence.length > 0
     ) {
-      const evidenceHeading = document.createElement('div');
-      evidenceHeading.textContent = 'What supports this recommendation';
+      const evidenceDetails = document.createElement('details');
+      evidenceDetails.style.marginTop = '10px';
+      evidenceDetails.style.paddingTop = '8px';
+      evidenceDetails.style.borderTop = '1px solid #bbf7d0';
+      const evidenceHeading = document.createElement('summary');
+      evidenceHeading.textContent = '🔍 View detailed evaluation metrics, class balance & fold breakdown';
       evidenceHeading.style.cssText =
-        'font-weight:750;margin-top:9px;margin-bottom:3px;color:#14532d;';
+        'font-weight:750;color:#15803d;cursor:pointer;font-size:11px;user-select:none;';
       const evidenceList = document.createElement('ul');
       evidenceList.style.cssText =
-        'margin:0;padding-left:18px;color:#166534;';
+        'margin:6px 0 0;padding-left:18px;color:#166534;font-size:10.5px;line-height:1.5;';
 
       for (const item of model.why_evidence) {
         const evidenceItem = document.createElement('li');
         evidenceItem.textContent = String(item);
-        evidenceItem.style.marginTop = '3px';
+        evidenceItem.style.marginTop = '4px';
         evidenceList.appendChild(evidenceItem);
       }
 
-      whyEl.append(evidenceHeading, evidenceList);
+      evidenceDetails.append(evidenceHeading, evidenceList);
 
       if (typeof model.why_confidence === 'string' && model.why_confidence) {
         const confidence = document.createElement('div');
-        confidence.textContent = `How to interpret it: ${model.why_confidence}`;
+        confidence.textContent = `💡 How to interpret it: ${model.why_confidence}`;
         confidence.style.cssText =
-          'margin-top:9px;padding-top:7px;border-top:1px solid #bbf7d0;font-weight:600;';
-        whyEl.appendChild(confidence);
+          'margin-top:9px;padding-top:7px;border-top:1px dashed #bbf7d0;font-weight:600;font-size:10.5px;color:#14532d;line-height:1.5;';
+        evidenceDetails.appendChild(confidence);
       }
+      whyEl.appendChild(evidenceDetails);
     }
 
     card.appendChild(whyEl);

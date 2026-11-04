@@ -6,6 +6,7 @@ import { ArrowUpRight, Database, Search, Sparkles, X } from "lucide-react";
 import ProjectsWorkspace from "@/components/projects/ProjectsWorkspace";
 import DocumentationLibrary from "@/components/documentation/DocumentationLibrary";
 import OpenJupyterForm from "@/components/notebook/OpenJupyterForm";
+import PracticeStudio from "@/components/practice/PracticeStudio";
 import EmbeddedLabViewer from "@/components/visualization/EmbeddedLabViewer";
 import { visualizations } from "@/lib/visualizations";
 import type { VisualizationItem } from "@/lib/visualizations";
@@ -14,9 +15,6 @@ import type { Workspace } from "./Sidebar";
 const ROADMAP_URL =
   "https://modelmind-personalized.divyanshmaheshwari617.workers.dev/";
 const VIDEOGPT_URL = "https://video-analysis-amber-pi.vercel.app/";
-const PRACTICE_REPOSITORY_URL =
-  "https://github.com/divyanshmaheshwari617-cell/ModelMind_more_practise";
-const PRACTICE_APP_URL = process.env.NEXT_PUBLIC_PRACTICE_APP_URL?.trim();
 
 const datasetFilters = ["All", "Classification", "Regression", "Clustering", "Time series"] as const;
 
@@ -720,13 +718,6 @@ function VideoGPT() {
 }
 
 function PracticeWorkspace() {
-  const practiceTopics = [
-    { name: "Python foundations", detail: "Functions, loops, collections, debugging", tone: "purple" },
-    { name: "Data preparation", detail: "NumPy, Pandas, missing values, feature pipelines", tone: "blue" },
-    { name: "Machine learning", detail: "Regression, classification, trees, clustering", tone: "green" },
-    { name: "Model evaluation", detail: "Metrics, validation, tuning, responsible deployment", tone: "orange" },
-  ];
-
   return (
     <main className="referencePage">
       <section className="referencePanel referencePractice">
@@ -736,55 +727,12 @@ function PracticeWorkspace() {
           title="Practice Studio"
           description="Build confidence with guided Python, data science, and machine-learning questions."
           action={
-            <ExternalLink className="referenceViewAll" href={PRACTICE_APP_URL || PRACTICE_REPOSITORY_URL}>
-              {PRACTICE_APP_URL ? "Start practicing" : "View practice project"} <ArrowIcon />
-            </ExternalLink>
+            <OpenJupyterForm className="practiceHeadingLaunch" notebookType="practice">
+              Open Practice Studio <ArrowIcon />
+            </OpenJupyterForm>
           }
         />
-
-        <div className="practiceIntro">
-          <div>
-            <span className="practiceEyebrow">LEARN BY DOING</span>
-            <h2>One question at a time. Real progress at your pace.</h2>
-            <p>
-              The separate ModelMind practice project contains 417 questions across programming, data analysis, and machine learning. Choose a topic, try a problem, then move up in difficulty.
-            </p>
-          </div>
-          <div className="practiceMetrics" aria-label="Practice question bank facts">
-            <div><strong>417</strong><span>questions in the practice project</span></div>
-            <div><strong>14</strong><span>coding questions with automated tests</span></div>
-          </div>
-        </div>
-
-        <div className="practiceTopicGrid">
-          {practiceTopics.map((topic, index) => (
-            <article className={`practiceTopicCard ${topic.tone}`} key={topic.name}>
-              <span className="practiceTopicNumber">0{index + 1}</span>
-              <div><h3>{topic.name}</h3><p>{topic.detail}</p></div>
-              <span className="practiceTopicArrow" aria-hidden="true"><ArrowIcon /></span>
-            </article>
-          ))}
-        </div>
-
-        <div className="practiceNextStep">
-          <div>
-            <span className="practiceEyebrow">YOUR WORKSPACE</span>
-            <h2>Want to solve a question in a notebook?</h2>
-            <p>Open Plain ModelMind Notebook for a clean Jupyter workspace without the AI chat or ML Studio panels.</p>
-          </div>
-          <OpenJupyterForm className="practiceNotebookButton" notebookType="plain">
-            Open Plain ModelMind Notebook <ArrowIcon />
-          </OpenJupyterForm>
-        </div>
-
-        {!PRACTICE_APP_URL && (
-          <p className="practiceConnectionNote" role="note">
-            The practice repository has no published app URL yet. The project link above opens its source; set <code>NEXT_PUBLIC_PRACTICE_APP_URL</code> after deploying the practice app to make this a direct launch button.
-          </p>
-        )}
-        <p className="practiceSafetyNote">
-          Automated code evaluation is currently local-development only in the practice project. Its README warns that the runner is not isolated for public internet use; only 14 coding questions have tests today, while other questions are self-practice.
-        </p>
+        <PracticeStudio />
       </section>
     </main>
   );

@@ -34,11 +34,13 @@ import {
   type TrainingSource
 } from './ai-chatbot';
 import { createAPIKeySettingsWidget } from './api-key-settings';
+import { createPracticeQuestionsWidget } from './practice-questions';
 import {
   MODEL_MIND_NOTEBOOK_TYPE,
   getModelMindNotebookRole
 } from './notebook-mode';
 import type { ModelMindNotebookRole } from './notebook-mode';
+import { initCellErrorHighlighter } from './cell-error-highlighter';
 
 const COMMAND_ID = '@ml-platform/error-assistant:open';
 const MAX_CODE_LENGTH = 20_000;
@@ -378,10 +380,16 @@ const plugin: JupyterFrontEndPlugin<void> = {
     const panel = new Widget();
     panel.id = 'ml-platform-error-assistant-panel';
     panel.title.label = 'Error Assistant';
-    panel.title.caption = 'Notebook error assistant';
+    panel.title.caption = 'Error Assistant — analyze & fix notebook errors';
     panel.addClass('ml-platform-error-assistant-panel');
 
+    // These are ModelMind Studio-only tools. Practice notebooks intentionally
+    // keep the normal Jupyter editor and the AI Chatbot, but not Studio,
+    // debugging, or API-key panels.
     const modeAwareWidgets: Widget[] = [panel];
+    const chatbotWidgets: Widget[] = [];
+    const practiceOnlyWidgets: Widget[] = [];
+    let practiceQuestionsWidget: Widget | null = null;
     const shellLayout = app.shell as typeof app.shell & {
       leftCollapsed?: boolean;
       rightCollapsed?: boolean;
@@ -391,56 +399,132 @@ const plugin: JupyterFrontEndPlugin<void> = {
       expandRight?: () => void;
       restored?: Promise<unknown>;
     };
+    let workspaceRestored = !shellLayout.restored;
     let previousSidebarState: {
       leftCollapsed: boolean;
       rightCollapsed: boolean;
+      leftActiveId: string | null;
+      rightActiveId: string | null;
     } | null = null;
+    if (!document.getElementById('mm-plain-notebook-styles')) {
+      const plainNotebookStyles = document.createElement('style');
+      plainNotebookStyles.id = 'mm-plain-notebook-styles';
+      plainNotebookStyles.textContent = `
+        body.mm-plain-modelmind-notebook
+          #jp-main-content-panel > .jp-SideArea[data-side="right"] {
+          display: none !important;
+        }
+        body.mm-plain-modelmind-notebook
+          .jp-SideBar.jp-mod-left
+          .lm-TabBar-tab[data-id="modelmind-studio-sidebar"],
+        body.mm-plain-modelmind-notebook #modelmind-studio-sidebar,
+        body.mm-plain-modelmind-notebook #mm-tutor-fab,
+        body.mm-plain-modelmind-notebook #mm-tutor-panel,
+        body.mm-plain-modelmind-notebook #mm-tutor-overlay {
+          display: none !important;
+        }
+      `;
+      document.head.appendChild(plainNotebookStyles);
+    }
+    const getActiveSidebarId = (side: 'left' | 'right'): string | null =>
+      document
+        .querySelector<HTMLElement>(
+          `.jp-SideBar.jp-mod-${side} .lm-TabBar-tab.lm-mod-current`
+        )
+        ?.dataset.id ?? null;
     let connectedNotebookModel: INotebookModel | null = null;
     const refreshNotebookPresentation = (): void => {
-      const plainNotebook =
-        getModelMindNotebookRole(notebooks.currentWidget?.context.model) ===
-        'plain';
+      const role = getModelMindNotebookRole(notebooks.currentWidget?.context.model);
+      const plainNotebook = role === 'plain';
+      const practiceNotebook = role === 'practice';
+      const hideStudioTools = plainNotebook || practiceNotebook;
       for (const widget of modeAwareWidgets) {
+        if (hideStudioTools) widget.hide();
+        else widget.show();
+      }
+      for (const widget of chatbotWidgets) {
         if (plainNotebook) widget.hide();
         else widget.show();
       }
+      for (const widget of practiceOnlyWidgets) {
+        if (practiceNotebook) widget.show();
+        else widget.hide();
+      }
       if (plainNotebook) {
-        const collapsePlainNotebookSidebars = (): void => {
-          if (
-            getModelMindNotebookRole(notebooks.currentWidget?.context.model) !==
-            'plain'
-          ) {
-            return;
-          }
-          if (!previousSidebarState) {
-            previousSidebarState = {
-              leftCollapsed: shellLayout.leftCollapsed ?? false,
-              rightCollapsed: shellLayout.rightCollapsed ?? false
-            };
-          }
-          shellLayout.collapseLeft?.();
-          shellLayout.collapseRight?.();
-        };
-        if (shellLayout.restored) {
-          void shellLayout.restored.then(collapsePlainNotebookSidebars);
-        } else {
-          collapsePlainNotebookSidebars();
+        // Workspace restoration can reselect a saved sidebar after notebook
+        // metadata is read. Capture the user's normal layout only after that
+        // restore completes so switching back to a regular notebook is exact.
+        if (!previousSidebarState && workspaceRestored) {
+          previousSidebarState = {
+            leftCollapsed: shellLayout.leftCollapsed ?? false,
+            rightCollapsed: shellLayout.rightCollapsed ?? false,
+            leftActiveId: getActiveSidebarId('left'),
+            rightActiveId: getActiveSidebarId('right')
+          };
+        }
+        document.body.classList.add('mm-plain-modelmind-notebook');
+        document.body.classList.remove('mm-practice-modelmind-notebook');
+        if (
+          !shellLayout.leftCollapsed &&
+          getActiveSidebarId('left') === 'modelmind-studio-sidebar'
+        ) {
+          app.shell.activateById('filebrowser');
+        }
+      } else if (practiceNotebook) {
+        document.body.classList.remove('mm-plain-modelmind-notebook');
+        document.body.classList.add('mm-practice-modelmind-notebook');
+        if (practiceQuestionsWidget && !shellLayout.leftCollapsed) {
+          app.shell.activateById(practiceQuestionsWidget.id);
+        }
+        if (!shellLayout.rightCollapsed && chatbotWidgets[0]) {
+          app.shell.activateById(chatbotWidgets[0].id);
         }
       } else if (previousSidebarState) {
+        document.body.classList.remove('mm-plain-modelmind-notebook');
+        document.body.classList.remove('mm-practice-modelmind-notebook');
         if (previousSidebarState.leftCollapsed) {
           shellLayout.collapseLeft?.();
-        } else {
-          shellLayout.expandLeft?.();
+        } else if (previousSidebarState.leftActiveId) {
+          // Only restore if the user hasn't manually switched to a different tab.
+          // Don't override a tab the user has explicitly clicked (e.g. Upload/Files).
+          const currentLeftId = getActiveSidebarId('left');
+          const isStillOnModelmindStudio =
+            currentLeftId === null ||
+            currentLeftId === 'modelmind-studio-sidebar';
+          if (isStillOnModelmindStudio) {
+            app.shell.activateById(previousSidebarState.leftActiveId);
+          }
         }
         if (previousSidebarState.rightCollapsed) {
           shellLayout.collapseRight?.();
-        } else {
-          shellLayout.expandRight?.();
+        } else if (previousSidebarState.rightActiveId) {
+          app.shell.activateById(previousSidebarState.rightActiveId);
         }
         previousSidebarState = null;
+      } else {
+        document.body.classList.remove('mm-plain-modelmind-notebook');
+        document.body.classList.remove('mm-practice-modelmind-notebook');
       }
-      setTutorEnabled(!plainNotebook);
+      setTutorEnabled(!hideStudioTools);
     };
+    void shellLayout.restored?.then(() => {
+      workspaceRestored = true;
+      refreshNotebookPresentation();
+
+      // ── Set default sidebar widths ──
+      // Only applies if the panel is currently narrower than our target.
+      // This means: on first open → our default. After user drags → their saved size.
+      setTimeout(() => {
+        const leftStack = document.querySelector<HTMLElement>('#jp-left-stack');
+        if (leftStack && leftStack.offsetWidth < 300) {
+          leftStack.style.width = '340px';
+        }
+        const rightStack = document.querySelector<HTMLElement>('#jp-right-stack');
+        if (rightStack && rightStack.offsetWidth < 300) {
+          rightStack.style.width = '350px';
+        }
+      }, 400);
+    });
     let applyNotebookPresentation: () => void = refreshNotebookPresentation;
     const refreshOnMetadataChange = (): void =>
       applyNotebookPresentation();
@@ -998,10 +1082,8 @@ const plugin: JupyterFrontEndPlugin<void> = {
 
     // ── Redirect listener: switch to AI Assistant when requested by Tutor (<70% confidence) ──
     window.addEventListener('modelmind:open-ai-assistant', (e: any) => {
-      if (
-        getModelMindNotebookRole(notebooks.currentWidget?.context.model) ===
-        'plain'
-      ) {
+      const role = getModelMindNotebookRole(notebooks.currentWidget?.context.model);
+      if (role === 'plain' || role === 'practice') {
         return;
       }
       app.shell.activateById(panel.id);
@@ -1022,7 +1104,7 @@ const plugin: JupyterFrontEndPlugin<void> = {
     // ═══════════════════════════════════════════════════════════
     const chatbotWidget = new Widget();
     chatbotWidget.id = 'mm-ai-chatbot-panel';
-    chatbotWidget.title.label = '💬 AI Chat';
+    chatbotWidget.title.label = 'AI Chat';
     chatbotWidget.title.caption = 'AI Chatbot — powered by Ollama & Gemini';
     chatbotWidget.addClass('mm-chatbot-widget');
 
@@ -1566,7 +1648,14 @@ for _mm_cleanup in ('_mm_args', '_mm_ns', '_mm_X', '_mm_y', '_mm_bad', '_mm_targ
     chatbotWidget.node.style.cssText = 'height:100%;overflow:hidden;';
     chatbotWidget.node.appendChild(chatbotRoot);
     app.shell.add(chatbotWidget, 'right', { rank: 800 });
-    modeAwareWidgets.push(chatbotWidget);
+    chatbotWidgets.push(chatbotWidget);
+
+    // ═══════════════════════════════════════════════════════════
+    // INLINE CELL ERROR HIGHLIGHTER & DIAGNOSTIC CARD
+    // Highlights the exact failing line and displays the clean
+    // error card below the editor across all notebooks.
+    // ═══════════════════════════════════════════════════════════
+    initCellErrorHighlighter(notebooks, NotebookActions);
 
     // ═══════════════════════════════════════════════════════════
     // AUTO-TRIGGER: Fire the Tutor immediately when any cell fails
@@ -1577,8 +1666,9 @@ for _mm_cleanup in ('_mm_args', '_mm_ns', '_mm_X', '_mm_y', '_mm_bad', '_mm_targ
       const { cell, success } = args;
       if (success) return; // only handle failures
       if (
-        getModelMindNotebookRole(notebooks.currentWidget?.context.model) ===
-        'plain'
+        ['plain', 'practice'].includes(
+          getModelMindNotebookRole(notebooks.currentWidget?.context.model)
+        )
       ) {
         return;
       }
@@ -1607,6 +1697,14 @@ for _mm_cleanup in ('_mm_args', '_mm_ns', '_mm_X', '_mm_y', '_mm_bad', '_mm_targ
     app.shell.add(studioWidget, 'left', { rank: 300 });
     modeAwareWidgets.push(studioWidget);
 
+    practiceQuestionsWidget = createPracticeQuestionsWidget(
+      app,
+      notebooks,
+      app.serviceManager.serverSettings
+    );
+    app.shell.add(practiceQuestionsWidget, 'left', { rank: 290 });
+    practiceOnlyWidgets.push(practiceQuestionsWidget);
+
     const apiKeyWidget = createAPIKeySettingsWidget(
       app.serviceManager.serverSettings,
       trans
@@ -1618,16 +1716,9 @@ for _mm_cleanup in ('_mm_args', '_mm_ns', '_mm_X', '_mm_y', '_mm_bad', '_mm_targ
     app.shell.add(apiKeyWidget, 'right', { rank: 700 });
     modeAwareWidgets.push(apiKeyWidget);
 
-    // Plain practice notebooks retain Jupyter's normal editor and kernel while
-    // suppressing all ModelMind-added AI and Studio tools.
+    // Plain notebooks suppress ModelMind tools. Practice notebooks retain the
+    // editor and chatbot, while replacing ML Studio with the question rail.
     applyNotebookPresentation = (): void => {
-      const plainNotebook =
-        getModelMindNotebookRole(notebooks.currentWidget?.context.model) ===
-        'plain';
-      for (const widget of modeAwareWidgets) {
-        if (plainNotebook) widget.hide();
-        else widget.show();
-      }
       refreshNotebookPresentation();
     };
     notebooks.currentChanged.connect((_, notebook) => {
@@ -1635,11 +1726,30 @@ for _mm_cleanup in ('_mm_args', '_mm_ns', '_mm_X', '_mm_y', '_mm_bad', '_mm_targ
         applyNotebookPresentation();
         return;
       }
+      // Snapshot which left sidebar tab the user currently has open BEFORE
+      // we hide widgets (which can cause layout shifts that reset the tab).
+      // This prevents the studio sidebar from re-activating over a tab the
+      // user manually chose (e.g. Upload / Files, Outline, Running, etc.).
+      const userChosenLeftTab = getActiveSidebarId('left');
       for (const widget of modeAwareWidgets) widget.hide();
       setTutorEnabled(false);
       void notebook.context.ready.then(() => {
         if (notebooks.currentWidget === notebook) {
           watchNotebookModel(notebook.context.model);
+          // After presentation refresh, restore the tab the user had open —
+          // but only if a non-studio tab was active (i.e. the user picked it).
+          if (
+            userChosenLeftTab &&
+            userChosenLeftTab !== 'modelmind-studio-sidebar'
+          ) {
+            // Give the DOM one tick to settle before restoring user's tab.
+            requestAnimationFrame(() => {
+              const stillActive = getActiveSidebarId('left');
+              if (stillActive !== userChosenLeftTab) {
+                app.shell.activateById(userChosenLeftTab);
+              }
+            });
+          }
         }
       });
     });
@@ -1652,10 +1762,8 @@ for _mm_cleanup in ('_mm_args', '_mm_ns', '_mm_X', '_mm_y', '_mm_bad', '_mm_targ
       label: 'Open ModelMind Studio',
       caption: 'Open the unified ModelMind ML Studio slide bar in the left panel',
       execute: () => {
-        if (
-          getModelMindNotebookRole(notebooks.currentWidget?.context.model) ===
-          'plain'
-        ) {
+        const role = getModelMindNotebookRole(notebooks.currentWidget?.context.model);
+        if (role === 'plain' || role === 'practice') {
           return;
         }
         app.shell.activateById(studioWidget.id);
@@ -1701,11 +1809,19 @@ for _mm_cleanup in ('_mm_args', '_mm_ns', '_mm_X', '_mm_y', '_mm_bad', '_mm_targ
       execute: () => createNotebook('plain')
     });
 
+    const PRACTICE_NOTEBOOK_COMMAND = 'modelmind:create-practice-notebook';
+    app.commands.addCommand(PRACTICE_NOTEBOOK_COMMAND, {
+      label: 'Open Practice Questions',
+      caption: 'Open the ModelMind practice notebook with question navigation and AI review',
+      execute: () => createNotebook('practice')
+    });
+
     mainMenu.fileMenu.newMenu.addGroup(
       [
         { command: MODEL_MIND_NOTEBOOK_COMMAND },
         { command: TRAINER_NOTEBOOK_COMMAND },
-        { command: PLAIN_NOTEBOOK_COMMAND }
+        { command: PLAIN_NOTEBOOK_COMMAND },
+        { command: PRACTICE_NOTEBOOK_COMMAND }
       ],
       899
     );
@@ -1720,6 +1836,28 @@ for _mm_cleanup in ('_mm_args', '_mm_ns', '_mm_X', '_mm_y', '_mm_bad', '_mm_targ
         .mm-icon-xray::before  { content: '🔬'; font-size:16px; }
         .mm-icon-prep::before  { content: '🧠'; font-size:16px; }
         .mm-icon-lab::before   { content: '⚗️'; font-size:16px; }
+        .mm-icon-practice {
+          display: inline-grid;
+          width: 22px;
+          height: 22px;
+          place-items: center;
+        }
+        .mm-icon-practice::before {
+          content: '✎';
+          display: grid;
+          width: 17px;
+          height: 17px;
+          place-items: center;
+          border: 2px solid #8b5cf6;
+          border-radius: 5px;
+          background: #f5f3ff;
+          color: #6d3df2;
+          font-family: ui-rounded, system-ui, sans-serif;
+          font-size: 15px;
+          font-weight: 800;
+          line-height: 1;
+          transform: rotate(-5deg);
+        }
 
         .mm-left-panel { overflow: hidden; }
         .mm-left-panel-root {
@@ -1808,10 +1946,8 @@ for _mm_cleanup in ('_mm_args', '_mm_ns', '_mm_X', '_mm_y', '_mm_bad', '_mm_targ
     app.commands.addCommand(COMMAND_ID, {
       label: 'Open Error Assistant',
       execute: () => {
-        if (
-          getModelMindNotebookRole(notebooks.currentWidget?.context.model) ===
-          'plain'
-        ) {
+        const role = getModelMindNotebookRole(notebooks.currentWidget?.context.model);
+        if (role === 'plain' || role === 'practice') {
           return;
         }
         app.shell.activateById(panel.id);
@@ -1825,6 +1961,9 @@ for _mm_cleanup in ('_mm_args', '_mm_ns', '_mm_X', '_mm_y', '_mm_bad', '_mm_targ
 
     // ── Setup Left Sidebar Section Names for the 5 tabs ──
     setupLeftSidebarSectionLabels();
+
+    // ── Setup Right Sidebar Section Names ──
+    setupRightSidebarSectionLabels();
   }
 };
 
@@ -1850,6 +1989,12 @@ function setupLeftSidebarSectionLabels(): void {
       shortName: 'Running',
       fullName: 'Active Kernels & Sessions',
       description: 'Monitor active kernels, terminals & running sessions'
+    },
+    {
+      match: (id, title) => id === 'modelmind-practice-questions' || title.toLowerCase().includes('practice questions'),
+      shortName: 'Practice',
+      fullName: 'Practice Questions',
+      description: 'Choose a question for the current practice notebook'
     },
     {
       match: (id, title) => id.includes('modelmind') || title.toLowerCase().includes('modelmind'),
@@ -1943,6 +2088,135 @@ function setupLeftSidebarSectionLabels(): void {
       }
     }, 1000);
   }
+}
+
+/**
+ * Cleans up right sidebar tab labels so they read as short, friendly names
+ * instead of the default truncated or emoji-broken JupyterLab labels.
+ */
+function setupRightSidebarSectionLabels(): void {
+  const RIGHT_SECTIONS: {
+    match: (id: string, title: string) => boolean;
+    shortName: string;
+  }[] = [
+    {
+      match: (id, title) =>
+        id === 'ml-platform-error-assistant-panel' ||
+        title.toLowerCase().includes('error'),
+      shortName: 'Error Assistant'
+    },
+    {
+      match: (id, title) =>
+        id === 'mm-ai-chatbot-panel' ||
+        title.toLowerCase().includes('chat') ||
+        title.toLowerCase().includes('ollama'),
+      shortName: 'AI Chat'
+    },
+    {
+      match: (id, title) =>
+        id.includes('api-key') || title.toLowerCase().includes('api key'),
+      shortName: 'API Key'
+    }
+  ];
+
+  // Inject CSS for right sidebar labels — hide rotated default labels, show ours
+  if (!document.getElementById('mm-right-sidebar-label-styles')) {
+    const s = document.createElement('style');
+    s.id = 'mm-right-sidebar-label-styles';
+    s.textContent = `
+      .jp-SideBar.jp-mod-right .lm-TabBar-tab .lm-TabBar-tabLabel {
+        display: none !important;
+      }
+      .jp-SideBar.jp-mod-right .lm-TabBar-tab .mm-sidebar-tab-label {
+        display: block;
+        font-size: 12.5px;
+        font-weight: 700;
+        writing-mode: vertical-rl;
+        text-orientation: mixed;
+        transform: rotate(180deg);
+        letter-spacing: 0.6px;
+        white-space: nowrap;
+        color: inherit;
+        margin: 0 auto;
+        padding: 6px 0;
+        font-family: system-ui, -apple-system, sans-serif;
+      }
+    `;
+    document.head.appendChild(s);
+  }
+
+  let isUpdatingRight = false;
+
+  const updateRightTabs = () => {
+    if (isUpdatingRight) return;
+    isUpdatingRight = true;
+    try {
+      const tabs = document.querySelectorAll<HTMLElement>(
+        '.jp-SideBar.jp-mod-right .lm-TabBar-tab'
+      );
+      if (!tabs || tabs.length === 0) return;
+
+      tabs.forEach(tab => {
+        const dataId = tab.getAttribute('data-id') || '';
+        const tabTitle = tab.getAttribute('title') || '';
+
+        const matched = RIGHT_SECTIONS.find(s => s.match(dataId, tabTitle));
+        if (!matched) return;
+
+        // Update tooltip
+        if (tab.title !== matched.shortName) {
+          tab.title = matched.shortName;
+        }
+
+        // Create or update our custom label
+        let labelEl = tab.querySelector<HTMLElement>('.mm-sidebar-tab-label');
+        if (!labelEl) {
+          labelEl = document.createElement('div');
+          labelEl.className = 'mm-sidebar-tab-label';
+          tab.appendChild(labelEl);
+        }
+        if (labelEl.textContent !== matched.shortName) {
+          labelEl.textContent = matched.shortName;
+        }
+
+        // Hide icon if it's showing a broken emoji
+        const iconEl = tab.querySelector<HTMLElement>('.lm-TabBar-tabIcon');
+        if (iconEl && iconEl.style.display !== 'none') {
+          iconEl.style.display = 'none';
+        }
+      });
+    } finally {
+      isUpdatingRight = false;
+    }
+  };
+
+  // Run on startup + staggered intervals
+  updateRightTabs();
+  [100, 300, 700, 1500, 3000, 5000].forEach(ms =>
+    setTimeout(updateRightTabs, ms)
+  );
+
+  // Observe right tab bar for new tabs
+  const tryObserve = () => {
+    const rightList = document.querySelector(
+      '.jp-SideBar.jp-mod-right .lm-TabBar-content'
+    );
+    if (rightList) {
+      const observer = new MutationObserver(() => updateRightTabs());
+      observer.observe(rightList, { childList: true });
+    } else {
+      setTimeout(() => {
+        const late = document.querySelector(
+          '.jp-SideBar.jp-mod-right .lm-TabBar-content'
+        );
+        if (late) {
+          const observer = new MutationObserver(() => updateRightTabs());
+          observer.observe(late, { childList: true });
+        }
+      }, 1000);
+    }
+  };
+  tryObserve();
 }
 
 export default plugin;

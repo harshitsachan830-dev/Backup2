@@ -1,17 +1,71 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuites name="jest tests" tests="6" failures="0" errors="0" time="2.18">
-  <testsuite name="@ml-platform/error-assistant" errors="0" failures="0" skipped="0" timestamp="2026-10-13T13:55:37" time="1.569" tests="6">
+<testsuites name="jest tests" tests="30" failures="0" errors="0" time="3.107">
+  <testsuite name="trace-backed loop visualization" errors="0" failures="0" skipped="0" timestamp="2026-11-04T04:08:41" time="1.683" tests="3">
+    <testcase classname="trace-backed loop visualization summarizes only captured visits and exposes the captured for-loop target" name="trace-backed loop visualization summarizes only captured visits and exposes the captured for-loop target" time="0.003">
+    </testcase>
+    <testcase classname="trace-backed loop visualization selects the innermost containing loop and does not invent values for while loops" name="trace-backed loop visualization selects the innermost containing loop and does not invent values for while loops" time="0">
+    </testcase>
+    <testcase classname="trace-backed loop visualization returns no loop summary for a trace line outside loop blocks" name="trace-backed loop visualization returns no loop summary for a trace line outside loop blocks" time="0">
+    </testcase>
+  </testsuite>
+  <testsuite name="Cell Error Highlighter" errors="0" failures="0" skipped="0" timestamp="2026-11-04T04:08:41" time="1.817" tests="10">
+    <testcase classname="Cell Error Highlighter parseErrorLine extracts line 99 from SyntaxError traceback (user screenshot 1)" name="Cell Error Highlighter parseErrorLine extracts line 99 from SyntaxError traceback (user screenshot 1)" time="0.002">
+    </testcase>
+    <testcase classname="Cell Error Highlighter parseErrorLine extracts line 6 from ZeroDivisionError traceback (user screenshot 2)" name="Cell Error Highlighter parseErrorLine extracts line 6 from ZeroDivisionError traceback (user screenshot 2)" time="0">
+    </testcase>
+    <testcase classname="Cell Error Highlighter parseErrorLine handles ipython-input style traceback frames" name="Cell Error Highlighter parseErrorLine handles ipython-input style traceback frames" time="0">
+    </testcase>
+    <testcase classname="Cell Error Highlighter parseErrorLine handles arrow pointers in tracebacks" name="Cell Error Highlighter parseErrorLine handles arrow pointers in tracebacks" time="0">
+    </testcase>
+    <testcase classname="Cell Error Highlighter parseErrorExplanation generates friendly explanations for ZeroDivisionError matching sample" name="Cell Error Highlighter parseErrorExplanation generates friendly explanations for ZeroDivisionError matching sample" time="0">
+    </testcase>
+    <testcase classname="Cell Error Highlighter parseErrorExplanation generates friendly explanations for SyntaxError with unclosed parenthesis" name="Cell Error Highlighter parseErrorExplanation generates friendly explanations for SyntaxError with unclosed parenthesis" time="0">
+    </testcase>
+    <testcase classname="Cell Error Highlighter parseErrorExplanation generates friendly explanations for NameError with variable name" name="Cell Error Highlighter parseErrorExplanation generates friendly explanations for NameError with variable name" time="0">
+    </testcase>
+    <testcase classname="Cell Error Highlighter parseErrorExplanation generates friendly explanations for KeyError with column name" name="Cell Error Highlighter parseErrorExplanation generates friendly explanations for KeyError with column name" time="0.001">
+    </testcase>
+    <testcase classname="Cell Error Highlighter parseErrorExplanation generates friendly explanations for TypeError" name="Cell Error Highlighter parseErrorExplanation generates friendly explanations for TypeError" time="0">
+    </testcase>
+    <testcase classname="Cell Error Highlighter createErrorBannerElement creates DOM structure matching user sample card" name="Cell Error Highlighter createErrorBannerElement creates DOM structure matching user sample card" time="0.005">
+    </testcase>
+  </testsuite>
+  <testsuite name="source-grounded code visualizations" errors="0" failures="0" skipped="0" timestamp="2026-11-04T04:08:41" time="1.927" tests="6">
+    <testcase classname="source-grounded code visualizations keeps pipeline steps in source order and avoids claiming runtime results" name="source-grounded code visualizations keeps pipeline steps in source order and avoids claiming runtime results" time="0.003">
+    </testcase>
+    <testcase classname="source-grounded code visualizations has a source-grounding entry for every report visualization and overlay" name="source-grounded code visualizations has a source-grounding entry for every report visualization and overlay" time="0">
+    </testcase>
+    <testcase classname="source-grounded code visualizations resolves recommendation labels only for registered visualization IDs" name="source-grounded code visualizations resolves recommendation labels only for registered visualization IDs" time="0">
+    </testcase>
+    <testcase classname="source-grounded code visualizations describes a recognized algorithm without inventing fitted metrics" name="source-grounded code visualizations describes a recognized algorithm without inventing fitted metrics" time="0.001">
+    </testcase>
+    <testcase classname="source-grounded code visualizations shows nested control-flow, recursion, and complexity cues from source only" name="source-grounded code visualizations shows nested control-flow, recursion, and complexity cues from source only" time="0.001">
+    </testcase>
+    <testcase classname="source-grounded code visualizations recognizes array, sorting, and binary-search source operations" name="source-grounded code visualizations recognizes array, sorting, and binary-search source operations" time="0">
+    </testcase>
+  </testsuite>
+  <testsuite name="@ml-platform/error-assistant" errors="0" failures="0" skipped="0" timestamp="2026-11-04T04:08:41" time="2.379" tests="11">
     <testcase classname="@ml-platform/error-assistant uses the Jupyter base URL and returns the server JSON response" name="@ml-platform/error-assistant uses the Jupyter base URL and returns the server JSON response" time="0.002">
     </testcase>
     <testcase classname="@ml-platform/error-assistant writes the suggested code through the cell shared model" name="@ml-platform/error-assistant writes the suggested code through the cell shared model" time="0">
     </testcase>
-    <testcase classname="@ml-platform/error-assistant rejects a missing cell model or empty code suggestion" name="@ml-platform/error-assistant rejects a missing cell model or empty code suggestion" time="0">
+    <testcase classname="@ml-platform/error-assistant rejects a missing cell model or empty code suggestion" name="@ml-platform/error-assistant rejects a missing cell model or empty code suggestion" time="0.001">
     </testcase>
-    <testcase classname="@ml-platform/error-assistant loads the selected dataset directly and inserts readable preprocessing code" name="@ml-platform/error-assistant loads the selected dataset directly and inserts readable preprocessing code" time="0.001">
+    <testcase classname="@ml-platform/error-assistant detects notebook roles and limits Trainer code actions to preview" name="@ml-platform/error-assistant detects notebook roles and limits Trainer code actions to preview" time="0">
     </testcase>
-    <testcase classname="@ml-platform/error-assistant removes generated Model Advisor raise guards but keeps normal code" name="@ml-platform/error-assistant removes generated Model Advisor raise guards but keeps normal code" time="0">
+    <testcase classname="@ml-platform/error-assistant loads the selected dataset directly and inserts readable preprocessing code" name="@ml-platform/error-assistant loads the selected dataset directly and inserts readable preprocessing code" time="0">
     </testcase>
-    <testcase classname="@ml-platform/error-assistant preserves baseline code and stores tuned code in tuned_code" name="@ml-platform/error-assistant preserves baseline code and stores tuned code in tuned_code" time="0.001">
+    <testcase classname="@ml-platform/error-assistant uses the selected skill-level preprocessing example for code actions" name="@ml-platform/error-assistant uses the selected skill-level preprocessing example for code actions" time="0">
+    </testcase>
+    <testcase classname="@ml-platform/error-assistant safely parses inferred numeric text when a strategy is changed" name="@ml-platform/error-assistant safely parses inferred numeric text when a strategy is changed" time="0">
+    </testcase>
+    <testcase classname="@ml-platform/error-assistant gives a concise model-specific reason and retains detailed CV evidence" name="@ml-platform/error-assistant gives a concise model-specific reason and retains detailed CV evidence" time="0.01">
+    </testcase>
+    <testcase classname="@ml-platform/error-assistant explains selected tuning parameters and supports unlisted settings" name="@ml-platform/error-assistant explains selected tuning parameters and supports unlisted settings" time="0">
+    </testcase>
+    <testcase classname="@ml-platform/error-assistant removes generated Model Advisor raise guards but keeps normal code" name="@ml-platform/error-assistant removes generated Model Advisor raise guards but keeps normal code" time="0.001">
+    </testcase>
+    <testcase classname="@ml-platform/error-assistant preserves baseline code and stores tuned code in tuned_code" name="@ml-platform/error-assistant preserves baseline code and stores tuned code in tuned_code" time="0">
     </testcase>
   </testsuite>
 </testsuites>
