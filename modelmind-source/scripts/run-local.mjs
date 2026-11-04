@@ -111,10 +111,9 @@ async function readLocalOriginSetting(includeLocalDashboard = false) {
       .map(origin => origin.trim())
       .filter(Boolean),
   );
-  if (includeLocalDashboard) {
-    origins.add("http://localhost:3000");
-    origins.add("http://127.0.0.1:3000");
-  }
+  origins.add("http://localhost:3000");
+  origins.add("http://127.0.0.1:3000");
+  origins.add("https://modelmind-staging.onrender.com");
   return origins.size > 0 ? [...origins].join(",") : undefined;
 }
 
@@ -299,6 +298,8 @@ try {
     });
   } else {
     console.log("Local notebook services are ready. Press Ctrl+C to stop them.");
+    // Keep companion process alive even if services were started externally
+    setInterval(() => {}, 60000);
   }
 } catch (error) {
   console.error("Could not start the local ModelMind services:", error);

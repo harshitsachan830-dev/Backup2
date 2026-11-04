@@ -325,3 +325,45 @@ def test_jupyter_open_allows_direct_navigation_from_trusted_referer(monkeypatch)
     )
     assert response.status_code == 303
     assert response.headers["location"] == "http://127.0.0.1:8899/lab/?token=local-test-token"
+
+
+def test_jupyter_open_gracefully_redirects_when_ensure_notebook_fails(monkeypatch):
+    def running_server(**kwargs):
+        assert kwargs["runtime_dir"]
+        return iter(
+            [
+                {
+                    "url": "http://localhost:8899/",
+                    "port": 8899,
+                    "base_url": "/",
+                    "token": "local-test-token",
+                    "password": False,
+                }
+            ]
+        )
+
+    def failing_ensure(*_args, **_kwargs):
+        raise RuntimeError("Could not initialize a secure request to the notebook server.")
+
+    monkeypatch.setattr("main.list_running_servers", running_server)
+    monkeypatch.setattr("main._ensure_jupyter_notebook", failing_ensure)
+
+    response = client.get(
+        "/jupyter/open?notebook_type=modelmind",
+        headers={"Referer": "http://localhost:3000/notebook"},
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+    assert response.headers["location"] == (
+        "http://127.0.0.1:8899/lab/tree/ModelMind-Notebook.ipynb?token=local-test-token"
+    )
+
+
+def test_render_subdomain_origin_is_accepted_for_prepare():
+    response = client.post(
+        "/jupyter/prepare",
+        json={"notebook_type": "modelmind"},
+        headers={"Origin": "https://modelmind-staging.onrender.com"},
+    )
+    assert response.status_code == 200
+    assert "launch_id" in response.json()

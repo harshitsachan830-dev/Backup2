@@ -1,5 +1,6 @@
 import json
 import http.cookiejar
+import logging
 import os
 import secrets
 import time
@@ -8,6 +9,8 @@ import urllib.request
 from pathlib import Path
 from typing import Literal
 from urllib.parse import quote, urlencode, urlsplit, urlunsplit
+
+logger = logging.getLogger("modelmind.backend")
 
 from fastapi import (
     Body,
@@ -55,7 +58,7 @@ from intelligence.preprocessing_apply import (
 )
 app = FastAPI(
     title="ModelMind Backend",
-    version="0.3.0",
+    version="0.3.1",
 )
 NotebookType = Literal["modelmind", "trainer", "plain", "practice"]
 pending_jupyter_launches: dict[str, tuple[float, NotebookType | None]] = {}
@@ -98,9 +101,27 @@ for origin in allowed_web_origins:
             "MODELMIND_WEB_ORIGINS must contain comma-separated HTTP(S) origins without paths or wildcards."
         )
 
+def is_origin_allowed(origin: str | None) -> bool:
+    if not origin:
+        return False
+    clean_origin = origin.strip().rstrip("/")
+    if clean_origin in allowed_web_origins:
+        return True
+    try:
+        parsed = urlsplit(clean_origin)
+        if parsed.scheme == "https" and parsed.hostname and parsed.hostname.endswith(".onrender.com"):
+            return True
+        if parsed.scheme in {"http", "https"} and parsed.hostname in {"localhost", "127.0.0.1"}:
+            return True
+    except Exception:
+        pass
+    return False
+
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_web_origins,
+    allow_origin_regex=r"^https://.*\.onrender\.com$",
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["Content-Type", "Authorization"],
@@ -117,7 +138,7 @@ async def enforce_local_web_origin(request, call_next):
     if (
         not is_capability_navigation
         and origin is not None
-        and origin not in allowed_web_origins
+        and not is_origin_allowed(origin)
     ):
         return JSONResponse(
             status_code=403,
@@ -204,7 +225,7 @@ def prepare_jupyter(
     request: Request,
     notebook_type: NotebookType | None = Body(default=None, embed=True),
 ):
-    if request.headers.get("origin") not in allowed_web_origins:
+    if not is_origin_allowed(request.headers.get("origin")):
         return JSONResponse(
             status_code=403,
             content={"detail": "This website is not allowed to open the local notebook."},
@@ -271,6 +292,50 @@ def _ensure_jupyter_notebook(server: dict, notebook_type: NotebookType) -> str:
         ),
     }
     filename, title, intro = notebook_details[notebook_type]
+
+    # 1. Direct filesystem check / creation when root_dir is local
+    root_dir = server.get("root_dir")
+    if isinstance(root_dir, str) and root_dir and os.path.isdir(root_dir):
+        try:
+            file_path = Path(root_dir) / filename
+            if file_path.is_file():
+                try:
+                    content = json.loads(file_path.read_text(encoding="utf-8"))
+                    metadata = content.setdefault("metadata", {})
+                    if metadata.get("modelmind_notebook_type") != notebook_type:
+                        metadata["modelmind_notebook_type"] = notebook_type
+                        file_path.write_text(json.dumps(content, indent=1), encoding="utf-8")
+                except Exception:
+                    pass
+                return filename
+            else:
+                notebook_content = {
+                    "cells": [
+                        {
+                            "cell_type": "markdown",
+                            "metadata": {},
+                            "source": f"# {title}\n\n{intro}",
+                        },
+                        {
+                            "cell_type": "code",
+                            "execution_count": None,
+                            "metadata": {},
+                            "outputs": [],
+                            "source": "",
+                        },
+                    ],
+                    "metadata": {"modelmind_notebook_type": notebook_type},
+                    "nbformat": 4,
+                    "nbformat_minor": 5,
+                }
+                file_path.write_text(json.dumps(notebook_content, indent=1), encoding="utf-8")
+                return filename
+        except Exception as error:
+            logger.warning(
+                "Filesystem preparation of %s failed (%s); trying HTTP API.",
+                filename,
+                error,
+            )
 
     server_url = server.get("url")
     if not isinstance(server_url, str):
@@ -526,19 +591,24 @@ def open_jupyter(
                 base_url = parsed_url.path or "/"
             lab_path = f"{base_url.rstrip('/')}/lab/"
             if selected_notebook_type is not None:
+                notebook_fallback = {
+                    "modelmind": "ModelMind-Notebook.ipynb",
+                    "trainer": "Trainer-Notebook.ipynb",
+                    "plain": "Plain-ModelMind-Notebook.ipynb",
+                    "practice": "ModelMind-Practice-Notebook.ipynb",
+                }
                 try:
                     notebook_filename = _ensure_jupyter_notebook(
                         server, selected_notebook_type
                     )
-                except RuntimeError as error:
-                    return HTMLResponse(
-                        status_code=503,
-                        content=(
-                            "<!doctype html><html><head><title>Could not open notebook</title>"
-                            "</head><body><h1>Could not open notebook</h1>"
-                            f"<p>{error}</p><p>Return to ModelMind and try again.</p>"
-                            "</body></html>"
-                        ),
+                except Exception as error:
+                    logger.warning(
+                        "Could not prepare notebook %s (%s); proceeding with direct launch.",
+                        selected_notebook_type,
+                        error,
+                    )
+                    notebook_filename = notebook_fallback.get(
+                        selected_notebook_type, "ModelMind-Notebook.ipynb"
                     )
                 lab_path = (
                     f"{base_url.rstrip('/')}/lab/tree/"
