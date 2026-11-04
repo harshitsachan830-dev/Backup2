@@ -610,8 +610,8 @@
   filter: none;
 }
 
-/* Custom Clear Text Label for the 5 Sections (Light Mode) */
-.mm-sidebar-tab-label {
+/* Custom Clear Text Label for the Left Sections (Light Mode) */
+.jp-SideBar.jp-mod-left .mm-sidebar-tab-label {
   display: block !important;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif !important;
   font-size: 9.5px !important;
@@ -626,6 +626,37 @@
   pointer-events: none !important;
   user-select: none !important;
   transition: color 0.18s ease !important;
+}
+
+/* Custom Clear Text Label for the Right Sections (Bigger font for Error Assistant, AI Chat, API Key) */
+.jp-SideBar.jp-mod-right .mm-sidebar-tab-label,
+.jp-SideBar.jp-mod-right .lm-TabBar-tab .mm-sidebar-tab-label {
+  display: block !important;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif !important;
+  font-size: 14.5px !important;
+  font-weight: 700 !important;
+  writing-mode: vertical-rl !important;
+  text-orientation: mixed !important;
+  transform: rotate(180deg) !important;
+  letter-spacing: 0.8px !important;
+  white-space: nowrap !important;
+  color: #334155 !important;
+  margin: 0 auto !important;
+  padding: 8px 0 !important;
+  max-width: none !important;
+  line-height: 1.35 !important;
+  user-select: none !important;
+  pointer-events: none !important;
+  transition: color 0.18s ease !important;
+}
+
+.jp-SideBar.jp-mod-right .lm-TabBar-tab:hover .mm-sidebar-tab-label {
+  color: #0f172a !important;
+}
+
+.jp-SideBar.jp-mod-right .lm-TabBar-tab.lm-mod-current .mm-sidebar-tab-label {
+  color: #4f46e5 !important;
+  font-weight: 800 !important;
 }
 
 .jp-SideBar.jp-mod-left .lm-TabBar-tab.lm-mod-current .mm-sidebar-tab-label {

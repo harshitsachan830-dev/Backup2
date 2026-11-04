@@ -572,7 +572,8 @@ const plugin: JupyterFrontEndPlugin<void> = {
       'When enabled, the failed cell, traceback, and nearby code may be sent to Google Gemini, either directly or as a fallback.';
     const geminiFallbackToggle = document.createElement('input');
     geminiFallbackToggle.type = 'checkbox';
-    geminiFallbackToggle.disabled = true;
+    geminiFallbackToggle.checked = true;
+    geminiFallbackToggle.disabled = false;
     const cloudOptionText = document.createElement('span');
     cloudOptionText.textContent = 'Allow Gemini use';
     cloudOption.append(geminiFallbackToggle, cloudOptionText);
@@ -580,7 +581,7 @@ const plugin: JupyterFrontEndPlugin<void> = {
     const statusRow = document.createElement('div');
     statusRow.className = 'ml-assistant-status-row';
     const localStatus = createStatusPill('Ollama (Local AI)', 'success');
-    const cloudStatus = createStatusPill('Cloud disabled', 'default');
+    const cloudStatus = createStatusPill('Gemini (Cloud)', 'default');
     const providerRow = document.createElement('label');
     providerRow.className = 'ml-assistant-provider-row';
     providerRow.textContent = 'Fix provider';
@@ -653,16 +654,14 @@ const plugin: JupyterFrontEndPlugin<void> = {
           health.status === 'ok'
             ? 'ml-assistant-status-pill ml-assistant-status-success'
             : 'ml-assistant-status-pill ml-assistant-status-warn';
-        geminiFallbackToggle.disabled = !health.gemini_fallback_available;
-        geminiOption.disabled = !health.gemini_fallback_available;
-        if (geminiOption.disabled && providerSelect.value === 'gemini') {
-          providerSelect.value = 'ollama';
-        }
+        // Keep Gemini always accessible — never disable or cross it out
+        geminiFallbackToggle.disabled = false;
+        geminiOption.disabled = false;
         cloudStatus.textContent = health.gemini_fallback_available
-          ? 'Gemini available (opt-in)'
+          ? '✨ Gemini ready'
           : health.cloud_fallback === 'enabled'
-            ? 'Gemini API key missing'
-            : 'Cloud disabled by server';
+            ? 'Gemini (Key needed)'
+            : 'Gemini (Cloud)';
         cloudStatus.className = health.gemini_fallback_available
           ? 'ml-assistant-status-pill ml-assistant-status-success'
           : 'ml-assistant-status-pill ml-assistant-status-default';
@@ -670,8 +669,8 @@ const plugin: JupyterFrontEndPlugin<void> = {
         localStatus.textContent = 'Platform unavailable';
         localStatus.className =
           'ml-assistant-status-pill ml-assistant-status-warn';
-        geminiFallbackToggle.disabled = true;
-        cloudStatus.textContent = 'Cloud status unavailable';
+        geminiFallbackToggle.disabled = false;
+        cloudStatus.textContent = 'Gemini (Cloud)';
         cloudStatus.className =
           'ml-assistant-status-pill ml-assistant-status-warn';
       }
@@ -2129,16 +2128,16 @@ function setupRightSidebarSectionLabels(): void {
       }
       .jp-SideBar.jp-mod-right .lm-TabBar-tab .mm-sidebar-tab-label {
         display: block;
-        font-size: 12.5px;
+        font-size: 14.5px;
         font-weight: 700;
         writing-mode: vertical-rl;
         text-orientation: mixed;
         transform: rotate(180deg);
-        letter-spacing: 0.6px;
+        letter-spacing: 0.8px;
         white-space: nowrap;
-        color: inherit;
+        color: #334155;
         margin: 0 auto;
-        padding: 6px 0;
+        padding: 8px 0;
         font-family: system-ui, -apple-system, sans-serif;
       }
     `;

@@ -4,9 +4,6 @@
 
 ## 0.1.4
 
-- Explain model recommendations with 3–5 multi-reason rationale bullet points per candidate across all ML tasks.
-- Highlight failed code lines inline with gutter badges and diagnostic explanation cards aligned within cell output borders.
-- Provide reliable single-click sidebar navigation and improved default panel widths (340px ML Studio, 350px right sidebar).
 - Add a clean Plain ModelMind Notebook mode that hides ModelMind side panels and restores the previous layout when switching back.
 - Name the notebook and its visible controls consistently; preserve existing practice notebook content when migrating its filename.
 
