@@ -29,6 +29,10 @@ jobs:
             runner: windows-latest
             suffix: Windows-x64
             name: Windows-x64
+          - platform: Linux
+            runner: ubuntu-latest
+            suffix: Linux-x64
+            name: Linux-x64
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -43,18 +47,28 @@ jobs:
         if: matrix.platform == 'macOS'
         env:
           MODELMIND_PACKAGE_SUFFIX: ${{ matrix.suffix }}
-          MODELMIND_APP_VERSION: "0.3.0"
+          MODELMIND_APP_VERSION: "0.3.2"
         run: |
           bash -n scripts/start-beta-macos.command
           bash -n scripts/start-platform.sh
           python scripts/check-extension-wheel.py
           bash scripts/package-private-macos.sh
+      - name: Validate and build Linux package
+        if: matrix.platform == 'Linux'
+        env:
+          MODELMIND_PACKAGE_SUFFIX: ${{ matrix.suffix }}
+          MODELMIND_APP_VERSION: "0.3.2"
+        run: |
+          bash -n scripts/start-beta-linux.sh
+          bash -n scripts/start-platform.sh
+          python scripts/check-extension-wheel.py
+          bash scripts/package-private-linux.sh
       - name: Validate and build Windows installer
         if: matrix.platform == 'Windows'
         shell: pwsh
         env:
           MODELMIND_PACKAGE_SUFFIX: ${{ matrix.suffix }}
-          MODELMIND_APP_VERSION: "0.3.0"
+          MODELMIND_APP_VERSION: "0.3.2"
         run: |
           python scripts/check-extension-wheel.py
           $tokens = $null
@@ -101,13 +115,13 @@ jobs:
       - name: Create release notes
         run: |
           cat << 'EOF' > release-notes.md
-          ## What's updated in 0.3.0
+          ## What's updated in 0.3.2
 
-          - **Enhanced Model Advisor Explanations**: Multi-reason educational explanations (3–5 concrete bullet points) explaining why each model candidate was selected or ranked.
-          - **Inline Cell Error Diagnostics**: Real-time error highlight within code cells with gutter indicator and detailed diagnostic card positioned inside proper cell output borders.
-          - **Sidebar Usability & Sizing**: Responsive 340px / 350px default sidebar widths with preserved user sizing, enhanced tab labels ("Error Assistant", "AI Chat", "API Key"), and reliable single-click sidebar navigation.
-          - **Classified Visualizations Hub**: Interactive 6-domain ML model taxonomy (Classification, Regression, Ensemble & Boosting, Clustering, Deep Learning, Optimization) with search and pixel-perfect card alignment.
-          - **Updated Extension Wheel & Backend**: Extension wheel v0.1.4 refreshed with all new frontend/backend assets and verified against release guardrails.
+          - **Gemini Assistant Always Available**: The Gemini option in the Error Assistant panel is always enabled and selectable without any strikethrough or disabled state.
+          - **Larger Sidebar Labels**: Right sidebar tab labels ("Error Assistant", "AI Chat", "API Key") enlarged to 14.5px bold (#334155) for clear readability.
+          - **Full Linux Support**: One-line zero-prompt installer (`install-linux.sh`) and standalone Linux package with desktop launcher.
+          - **Bulletproof Windows Installer**: One-line PowerShell install with zero security alerts, automatic desktop shortcut, and robust multi-release fallback.
+          - **Updated Extension Wheel v0.1.5**: Packaged with all latest frontend, backend, and diagnostics fixes.
 
           ## ModelMind Installers & User Guide
 
@@ -144,15 +158,29 @@ jobs:
 
           ---
 
+          ### 🐧 Linux (Ubuntu, Debian, Fedora, Arch, RHEL)
+          - **Standalone Archive**: `ModelMind-Setup-Linux-x64.tar.gz`
+
+          #### ⚡ 1-Line Fast Install (Terminal)
+          Open terminal and run this single line (no root permissions required):
+          ```bash
+          curl -fsSL https://raw.githubusercontent.com/harshitsachan830-dev/Backup2/main/scripts/install-linux.sh | bash
+          ```
+
+          ---
+
           ### 🚀 First Launch Setup
           1. Launch ModelMind — your default browser will open the dashboard.
           2. In the notebook, paste your Google Gemini API key into the **API Key** tab in the right sidebar.
           3. For local offline AI models, install Ollama from [ollama.com](https://ollama.com).
           EOF
-      - name: Create private prerelease
+      - name: Create or update release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          gh release upload "$GITHUB_REF_NAME" release-assets/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --clobber || \
           gh release create "$GITHUB_REF_NAME" release-assets/* \
             --repo "$GITHUB_REPOSITORY" \
             --prerelease \

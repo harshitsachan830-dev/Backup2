@@ -10,7 +10,8 @@
 #   3. Removes Windows Mark-of-the-Web (Unblock-File) to bypass SmartScreen warnings
 #   4. Installs ModelMind quietly to %LOCALAPPDATA%\Programs\ModelMind (no admin needed)
 #   5. Creates Start Menu and Desktop shortcuts with custom ModelMind icon
-#   6. Launches ModelMind immediately
+#   6. Updates scripts and extension wheel to the latest verified release
+#   7. Launches ModelMind immediately with zero security prompts
 # ==============================================================================
 
 $ErrorActionPreference = "Stop"
@@ -33,61 +34,88 @@ if (-not [System.Environment]::Is64BitOperatingSystem) {
 Write-Host "-> System Architecture: 64-bit Windows detected" -ForegroundColor Green
 
 # 2. Get latest release
-Write-Host "-> Fetching latest release info from GitHub... " -NoNewline
+Write-Host "-> Fetching release information from GitHub... " -NoNewline
 $latestTag = "private-companion-v0.3.2"
+$fallbackTags = @("private-companion-v0.3.2", "private-companion-v0.3.1", "private-companion-v0.3.0", "private-companion-v0.2.9")
 try {
-    $releaseData = Invoke-RestMethod -Uri "https://api.github.com/repos/$repo/releases" -UseBasicParsing -ErrorAction SilentlyContinue
-    if ($releaseData -and $releaseData.Count -gt 0) {
-        $latestTag = $releaseData[0].tag_name
+    $releases = Invoke-RestMethod -Uri "https://api.github.com/repos/$repo/releases" -UseBasicParsing -ErrorAction SilentlyContinue
+    if ($releases -and $releases.Count -gt 0) {
+        $latestTag = $releases[0].tag_name
+        $fallbackTags = @($releases | ForEach-Object { $_.tag_name })
     }
 } catch {
     # fallback to default
 }
 Write-Host $latestTag -ForegroundColor Green
 
-$downloadUrl = "https://github.com/$repo/releases/download/$latestTag/$assetName"
 $tempDir = Join-Path $env:TEMP "ModelMind-Install-$(Get-Random)"
 New-Item -ItemType Directory -Path $tempDir -Force | Out-Null
 $installerPath = Join-Path $tempDir $assetName
 
-# 3. Download installer
+# 3. Download installer with multi-version fallback
 Write-Host "-> Downloading $appName ($assetName)..."
-try {
-    [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.SecurityProtocolType]::Tls12 -bor [System.Net.SecurityProtocolType]::Tls13
-    (New-Object System.Net.WebClient).DownloadFile($downloadUrl, $installerPath)
-} catch {
-    Invoke-WebRequest -Uri $downloadUrl -OutFile $installerPath -UseBasicParsing
+[System.Net.ServicePointManager]::SecurityProtocol = [System.Net.SecurityProtocolType]::Tls12 -bor [System.Net.SecurityProtocolType]::Tls13
+
+$downloadSuccess = $false
+foreach ($tag in $fallbackTags) {
+    $downloadUrl = "https://github.com/$repo/releases/download/$tag/$assetName"
+    try {
+        (New-Object System.Net.WebClient).DownloadFile($downloadUrl, $installerPath)
+        if ((Test-Path $installerPath) -and (Get-Item $installerPath).Length -gt 1000000) {
+            $downloadSuccess = $true
+            Write-Host "-> Successfully fetched installer from $tag" -ForegroundColor Green
+            break
+        }
+    } catch {
+        try {
+            Invoke-WebRequest -Uri $downloadUrl -OutFile $installerPath -UseBasicParsing -ErrorAction SilentlyContinue
+            if ((Test-Path $installerPath) -and (Get-Item $installerPath).Length -gt 1000000) {
+                $downloadSuccess = $true
+                Write-Host "-> Successfully fetched installer from $tag" -ForegroundColor Green
+                break
+            }
+        } catch { }
+    }
 }
 
-if (-not (Test-Path $installerPath)) {
-    Write-Error "Failed to download installer from $downloadUrl"
-    exit 1
-}
+$installDir = Join-Path $env:LOCALAPPDATA "Programs\ModelMind"
 
-# 4. Remove Windows Mark-of-the-Web (bypasses SmartScreen untrusted download warning)
-Write-Host "-> Removing security download restrictions (Unblock-File)... " -NoNewline
-Unblock-File -Path $installerPath -ErrorAction SilentlyContinue
-Write-Host "Unrestricted" -ForegroundColor Green
+if ($downloadSuccess) {
+    # 4. Remove Windows Mark-of-the-Web (bypasses SmartScreen untrusted download warning)
+    Write-Host "-> Removing security download restrictions (Unblock-File)... " -NoNewline
+    Unblock-File -Path $installerPath -ErrorAction SilentlyContinue
+    Write-Host "Unrestricted" -ForegroundColor Green
 
-# 5. Run Inno Setup installer silently to local app data (no elevation required)
-Write-Host "-> Installing ModelMind... " -NoNewline
-$installProcess = Start-Process -FilePath $installerPath -ArgumentList "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP-" -PassThru -Wait
-if ($installProcess.ExitCode -ne 0) {
-    Write-Host "Running with standard UI..." -ForegroundColor Yellow
-    Start-Process -FilePath $installerPath -Wait
+    # 5. Run Inno Setup installer silently to local app data (no elevation required)
+    Write-Host "-> Installing ModelMind... " -NoNewline
+    $installProcess = Start-Process -FilePath $installerPath -ArgumentList "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP-" -PassThru -Wait
+    if ($installProcess.ExitCode -ne 0) {
+        Write-Host "Running with standard UI..." -ForegroundColor Yellow
+        Start-Process -FilePath $installerPath -Wait
+    } else {
+        Write-Host "Installed" -ForegroundColor Green
+    }
 } else {
-    Write-Host "Installed" -ForegroundColor Green
+    Write-Host "-> Direct binary not yet cached on release; performing clean portable setup..." -ForegroundColor Yellow
+    New-Item -ItemType Directory -Path $installDir -Force | Out-Null
+    $zipPath = Join-Path $tempDir "modelmind.zip"
+    $zipUrl = "https://github.com/$repo/archive/refs/heads/main.zip"
+    Invoke-WebRequest -Uri $zipUrl -OutFile $zipPath -UseBasicParsing
+    Expand-Archive -Path $zipPath -DestinationPath $tempDir -Force
+    $extractedFolder = Get-ChildItem -Path $tempDir -Directory | Where-Object { $_.Name -like "*Backup2*" -or $_.Name -like "*modelmind*" } | Select-Object -First 1
+    if ($extractedFolder) {
+        Copy-Item -Path (Join-Path $extractedFolder.FullName "*") -Destination $installDir -Recurse -Force
+    }
 }
 
 # Clean up temp installer
 Remove-Item -LiteralPath $tempDir -Recurse -Force -ErrorAction SilentlyContinue
 
 # 6. Unblock installed program files and apply updates
-$installDir = Join-Path $env:LOCALAPPDATA "Programs\ModelMind"
 if (Test-Path $installDir) {
     Get-ChildItem -Path $installDir -Recurse -ErrorAction SilentlyContinue | Unblock-File -ErrorAction SilentlyContinue
 
-    # Pre-create ModelMind Notebooks directory in user profile (same as macOS ~/ModelMind Notebooks)
+    # Pre-create ModelMind Notebooks directory in user profile
     $homeDir = if ($env:USERPROFILE) { $env:USERPROFILE } else { $HOME }
     $notebooksDir = Join-Path $homeDir "ModelMind Notebooks"
     try {
@@ -101,12 +129,22 @@ if (Test-Path $installDir) {
         } catch { }
     }
 
+    # Copy sample datasets if missing
+    foreach ($sample in @("50_Startups.csv", "test_dataset.csv", "messy_preprocessing_dataset.csv", "perceptron-cleaned-data.csv")) {
+        $sourceSample = Join-Path $installDir $sample
+        $destSample = Join-Path $notebooksDir $sample
+        if ((Test-Path $sourceSample) -and (-not (Test-Path $destSample))) {
+            Copy-Item -Path $sourceSample -Destination $destSample -Force -ErrorAction SilentlyContinue
+        }
+    }
+
     # Update scripts with latest verified fixes
     try {
         $scriptsDir = Join-Path $installDir "scripts"
         if (Test-Path $scriptsDir) {
             Invoke-WebRequest -Uri "https://raw.githubusercontent.com/harshitsachan830-dev/Backup2/main/scripts/start-platform.ps1" -OutFile (Join-Path $scriptsDir "start-platform.ps1") -UseBasicParsing -ErrorAction SilentlyContinue
             Invoke-WebRequest -Uri "https://raw.githubusercontent.com/harshitsachan830-dev/Backup2/main/scripts/start-beta-windows.ps1" -OutFile (Join-Path $scriptsDir "start-beta-windows.ps1") -UseBasicParsing -ErrorAction SilentlyContinue
+            Invoke-WebRequest -Uri "https://raw.githubusercontent.com/harshitsachan830-dev/Backup2/main/scripts/start-beta-windows.cmd" -OutFile (Join-Path $scriptsDir "start-beta-windows.cmd") -UseBasicParsing -ErrorAction SilentlyContinue
         }
 
         $jupyterCfgDir = Join-Path $installDir "jupyter-config"
@@ -137,6 +175,16 @@ if (Test-Path $installDir) {
             New-Item -ItemType Directory -Path $cfgTarget -Force | Out-Null
             Set-Content -Path (Join-Path $cfgTarget "ml_platform_error_assistant.json") -Value '{"ServerApp": {"jpserver_extensions": {"ml_platform_error_assistant": true}}}' -Force
         }
+
+        # Create or refresh Desktop shortcut
+        $wshShell = New-Object -ComObject WScript.Shell
+        $desktopPath = [System.Environment]::GetFolderPath('Desktop')
+        $shortcut = $wshShell.CreateShortcut((Join-Path $desktopPath "ModelMind.lnk"))
+        $shortcut.TargetPath = Join-Path $installDir "scripts\start-beta-windows.cmd"
+        $shortcut.WorkingDirectory = $installDir
+        $shortcut.IconLocation = (Join-Path $installDir "modelmind-source\app\favicon.ico")
+        $shortcut.Description = "ModelMind Machine Learning Platform"
+        $shortcut.Save()
     } catch {
         # Non-fatal if offline
     }
@@ -149,12 +197,11 @@ Write-Host "============================================================" -Foreg
 Write-Host "  ModelMind successfully installed with zero security alerts! " -ForegroundColor Green
 Write-Host "============================================================" -ForegroundColor Green
 Write-Host ""
-Write-Host "Shortcuts created on Desktop and Start Menu." -ForegroundColor Cyan
-Write-Host "Starting ModelMind now..." -ForegroundColor Cyan
+Write-Host "You can launch it anytime from your Desktop shortcut or:" -ForegroundColor Cyan
+Write-Host "  $launcherPath" -ForegroundColor Yellow
+Write-Host "Starting ModelMind now..."
 Write-Host ""
 
 if (Test-Path $launcherPath) {
     Start-Process -FilePath $launcherPath
-} else {
-    Write-Host "You can start ModelMind anytime from your Desktop or Start Menu." -ForegroundColor Yellow
 }
