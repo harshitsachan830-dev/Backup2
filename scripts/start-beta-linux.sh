@@ -51,10 +51,27 @@ fi
 
 mkdir -p "$USER_DATA_DIR" "$WORKSPACE_DIR" "$JUPYTER_RUNTIME_DIR"
 export MODELMIND_USER_DATA_DIR="$USER_DATA_DIR"
-export MODELMIND_VENV_DIR="$USER_DATA_DIR/.venv"
+if [[ -d "$ROOT_DIR/.venv" && -x "$ROOT_DIR/.venv/bin/python" ]] && "$ROOT_DIR/.venv/bin/python" -c "pass" >/dev/null 2>&1; then
+  export MODELMIND_VENV_DIR="$ROOT_DIR/.venv"
+else
+  export MODELMIND_VENV_DIR="$USER_DATA_DIR/.venv"
+fi
 export JUPYTER_RUNTIME_DIR
 export WORKSPACE="$WORKSPACE_DIR"
 export ML_PLATFORM_CLOUD_FALLBACK="${ML_PLATFORM_CLOUD_FALLBACK:-disabled}"
+
+# Free port 8000 if occupied by a conflicting foreign process
+if command -v lsof >/dev/null 2>&1; then
+  PID_8000="$(lsof -ti :8000 2>/dev/null || true)"
+  if [[ -n "$PID_8000" ]]; then
+    HEALTH_RESP="$(curl -s -m 2 http://127.0.0.1:8000/health 2>/dev/null || true)"
+    if [[ "$HEALTH_RESP" != *"modelmind"* ]]; then
+      echo "Port 8000 was occupied by conflicting process (PID $PID_8000). Freeing port 8000 for ModelMind..."
+      kill -9 $PID_8000 2>/dev/null || true
+      sleep 1
+    fi
+  fi
+fi
 
 # Copy sample datasets
 for sample in "$ROOT_DIR"/50_Startups.csv "$ROOT_DIR"/test_dataset.csv "$ROOT_DIR"/messy_preprocessing_dataset.csv "$ROOT_DIR"/perceptron-cleaned-data.csv; do

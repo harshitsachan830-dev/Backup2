@@ -215,6 +215,8 @@ def home():
 def health():
     return {
         "status": "healthy",
+        "app": "modelmind",
+        "service": "modelmind-local-api",
         "runtime": "v2",
         "jupyter_port": jupyter_port,
     }
@@ -632,6 +634,25 @@ def open_jupyter(
                 ("http", f"127.0.0.1:{port}", lab_path, query, "")
             )
             return RedirectResponse(launch_url, status_code=303)
+
+    # Fallback: probe http://127.0.0.1:{jupyter_port}/api directly if server discovery didn't find it
+    try:
+        probe_req = urllib.request.Request(f"http://127.0.0.1:{jupyter_port}/api")
+        with urllib.request.urlopen(probe_req, timeout=1.5) as probe_resp:
+            if probe_resp.status in (200, 302, 401):
+                notebook_fallback = {
+                    "modelmind": "ModelMind-Notebook.ipynb",
+                    "trainer": "Trainer-Notebook.ipynb",
+                    "plain": "Plain-ModelMind-Notebook.ipynb",
+                    "practice": "ModelMind-Practice-Notebook.ipynb",
+                }
+                notebook_filename = notebook_fallback.get(
+                    selected_notebook_type, "ModelMind-Notebook.ipynb"
+                )
+                launch_url = f"http://127.0.0.1:{jupyter_port}/lab/tree/{quote(notebook_filename)}"
+                return RedirectResponse(launch_url, status_code=303)
+    except Exception:
+        pass
 
     return HTMLResponse(
         status_code=503,

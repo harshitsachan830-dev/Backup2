@@ -27,7 +27,7 @@ const venvDirectory =
   (process.env.MODELMIND_USER_DATA_DIR
     ? resolve(process.env.MODELMIND_USER_DATA_DIR, ".venv")
     : resolve(repositoryDirectory, ".venv"));
-const pythonExecutable =
+let pythonExecutable =
   process.platform === "win32"
     ? resolve(venvDirectory, "Scripts", "python.exe")
     : resolve(venvDirectory, "bin", "python");
@@ -66,7 +66,12 @@ async function isBackendRunning() {
     }
 
     const body = await response.json();
-    return body?.status === "healthy";
+    return (
+      body?.status === "healthy" &&
+      (body?.service === "modelmind-local-api" ||
+        body?.app === "modelmind" ||
+        body?.runtime === "v2")
+    );
   } catch {
     return false;
   }
@@ -230,7 +235,18 @@ try {
       await access(pythonExecutable);
       canStartPython = true;
     } catch {
-      console.log("Python virtual environment not found; skipping local ModelMind Python API.");
+      const localVenvPython =
+        process.platform === "win32"
+          ? resolve(repositoryDirectory, ".venv", "Scripts", "python.exe")
+          : resolve(repositoryDirectory, ".venv", "bin", "python");
+      try {
+        await access(localVenvPython);
+        pythonExecutable = localVenvPython;
+        canStartPython = true;
+        console.log(`Using repository Python virtual environment at ${localVenvPython}.`);
+      } catch {
+        console.log("Python virtual environment not found; skipping local ModelMind Python API.");
+      }
     }
 
     if (canStartPython) {

@@ -28,17 +28,33 @@ if [[ -f "$ENV_FILE" ]]; then
 fi
 export ML_PLATFORM_CLOUD_FALLBACK="${ML_PLATFORM_CLOUD_FALLBACK:-disabled}"
 
-if [[ ! -x "$VENV_DIR/bin/python" ]]; then
-  echo "Creating local virtual environment at $VENV_DIR"
-  mkdir -p "$(dirname "$VENV_DIR")"
-  if [[ -n "${MODELMIND_PYTHON_EXECUTABLE:-}" ]]; then
-    "$MODELMIND_PYTHON_EXECUTABLE" -m venv "$VENV_DIR"
-  elif [[ -x "$ROOT_DIR/runtime/python/bin/python3.12" ]]; then
-    "$ROOT_DIR/runtime/python/bin/python3.12" -m venv "$VENV_DIR"
-  elif [[ -x "$ROOT_DIR/runtime/python/bin/python3" ]]; then
-    "$ROOT_DIR/runtime/python/bin/python3" -m venv "$VENV_DIR"
+if [[ ! -x "$VENV_DIR/bin/python" ]] || ! "$VENV_DIR/bin/python" -c "pass" >/dev/null 2>&1; then
+  if [[ -x "$ROOT_DIR/.venv/bin/python" ]] && "$ROOT_DIR/.venv/bin/python" -c "pass" >/dev/null 2>&1; then
+    echo "Using existing healthy repository virtual environment at $ROOT_DIR/.venv"
+    VENV_DIR="$ROOT_DIR/.venv"
   else
-    python3 -m venv "$VENV_DIR"
+    echo "Creating local virtual environment at $VENV_DIR"
+    mkdir -p "$(dirname "$VENV_DIR")"
+    if [[ -n "${MODELMIND_PYTHON_EXECUTABLE:-}" ]]; then
+      "$MODELMIND_PYTHON_EXECUTABLE" -m venv --clear "$VENV_DIR"
+    elif [[ -x "$ROOT_DIR/runtime/python/bin/python3.12" ]]; then
+      "$ROOT_DIR/runtime/python/bin/python3.12" -m venv --clear "$VENV_DIR"
+    elif [[ -x "$ROOT_DIR/runtime/python/bin/python3" ]]; then
+      "$ROOT_DIR/runtime/python/bin/python3" -m venv --clear "$VENV_DIR"
+    else
+      python3 -m venv --clear "$VENV_DIR"
+    fi
+  fi
+fi
+
+if command -v lsof >/dev/null 2>&1; then
+  PID_8000="$(lsof -ti :8000 2>/dev/null || true)"
+  if [[ -n "$PID_8000" ]]; then
+    HEALTH_RESP="$(curl -s -m 2 http://127.0.0.1:8000/health 2>/dev/null || true)"
+    if [[ "$HEALTH_RESP" != *"modelmind"* ]]; then
+      echo "Port 8000 was occupied by conflicting process (PID $PID_8000). Freeing port 8000 for ModelMind..."
+      kill -9 $PID_8000 2>/dev/null || true
+    fi
   fi
 fi
 

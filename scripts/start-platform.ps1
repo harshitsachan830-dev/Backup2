@@ -102,7 +102,7 @@ if (Test-Path $envFile) {
 if (-not (Test-Path (Join-Path $venv "Scripts\python.exe"))) {
     Write-Host "Creating local virtual environment at $venv"
     New-Item -ItemType Directory -Path (Split-Path $venv) -Force | Out-Null
-    & $PythonExe -m venv $venv
+    & $PythonExe -m venv --clear $venv
 }
 
 $python = Join-Path $venv "Scripts\python.exe"

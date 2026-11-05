@@ -30,24 +30,39 @@ export default function OpenJupyterForm({
     notebookWindow.opener = null;
     setOpening(true);
 
+    let foreignPortConflict = false;
+
     try {
       const response = await fetch(`${API_URL}/jupyter/prepare`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ notebook_type: notebookType }),
       });
-      const result = (await response.json()) as {
-        detail?: string;
-        launch_id?: string;
-      };
-      if (response.ok && result.launch_id) {
-        notebookWindow.location.href =
-          `${API_URL}/jupyter/open?launch_id=${encodeURIComponent(result.launch_id)}`;
-        return;
+      if (response.ok) {
+        const result = (await response.json()) as {
+          detail?: string;
+          launch_id?: string;
+        };
+        if (result.launch_id) {
+          notebookWindow.location.href =
+            `${API_URL}/jupyter/open?launch_id=${encodeURIComponent(result.launch_id)}`;
+          return;
+        }
+      } else if (response.status === 404) {
+        foreignPortConflict = true;
       }
     } catch {
       // Browsers like Safari block HTTPS-to-HTTP localhost fetch as mixed content.
       // Top-level window navigation is permitted and sends the trusted Referer header.
+    }
+
+    if (foreignPortConflict) {
+      notebookWindow.close();
+      setError(
+        "Port 8000 is in use by another application or ModelMind companion is not running. Please launch the ModelMind desktop companion on this computer.",
+      );
+      setOpening(false);
+      return;
     }
 
     try {
